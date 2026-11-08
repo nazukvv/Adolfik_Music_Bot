@@ -1,0 +1,21 @@
+# Adolfik — залежності (Python 3.14, Windows 11)
+
+# discord.py з GitHub (остання версія) + голосові залежності (PyNaCl).
+discord.py[voice] @ git+https://github.com/Rapptz/discord.py
+
+# DAVE (E2EE у войсі, обов'язкове з березня 2026).
+# СТРОГО <0.2: з davey 0.2.0 бот підключається (зелене коло), але звуку НЕМА.
+# Не оновлювати, доки discord.py офіційно не підтримає 0.2.x.
+davey>=0.1.7,<0.2
+
+# На Python 3.13+ модуля audioop нема; discord.py сам тягне audioop-lts для гучності.
+audioop-lts; python_version >= "3.13"
+
+# YouTube: пошук і витягування прямого аудіо-посилання.
+# [default] включає yt-dlp-ejs (розв'язувач JS-челенджів YouTube; потрібен Node.js або Deno).
+yt-dlp[default]
+
+aiohttp>=3.9
+python-dotenv>=1.0
+# Домінантний колір мініатюри для смужки embed.
+pillow>=11

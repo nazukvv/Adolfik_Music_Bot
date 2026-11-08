@@ -1,0 +1,16 @@
+# Секрети
+.env
+cookies.txt
+
+# Середовище і кеш
+.venv/
+__pycache__/
+*.py[cod]
+
+# Робочі дані
+logs/
+data/
+
+# Бінарники ffmpeg (~85 МБ) — не тримаємо в git
+bin/*.exe
+.ruff_cache/

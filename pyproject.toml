@@ -1,0 +1,8 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = [".venv", "_backup*"]
+
+[tool.ruff.lint]
+select = ["F", "E9", "B", "ASYNC", "RUF006"]
+ignore = ["B008", "ASYNC109"]
