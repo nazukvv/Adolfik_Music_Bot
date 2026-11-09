@@ -29,6 +29,7 @@ PREFETCH_DELAY = 2  # через скільки секунд після стар
 PREFETCH_BEFORE_END = 25  # для довгих треків: за скільки секунд до кінця
 PREFETCH_MAX_AGE = 30 * 60  # старіші передзавантажені URL не використовуємо (живуть вони ~6 год)
 PANEL_RESEND_AFTER = 4  # стільки нових повідомлень під панеллю — переносимо її вниз
+PANEL_MIN_INTERVAL = 2.5  # мінімум секунд між редагуваннями панелі (Discord обмежує частоту → 429)
 ACTION_TTL = 90  # скільки секунд показувати «хто що натиснув» у футері
 MAX_QUEUE = 1000
 FRAME_SECONDS = 0.02  # discord.py читає PCM кадрами по 20 мс
@@ -112,6 +113,10 @@ class GuildPlayer:
         self._auto_paused = False
         self.closing = False
         self._panel_lock = asyncio.Lock()
+        self._panel_waiting = False  # оновлення панелі вже в черзі — нові запити зливаються в нього
+        self._panel_new_track = False
+        self._panel_resend = False
+        self._panel_edited_at = 0.0
 
         self._prefetch: tuple[str, asyncio.Task[Stream]] | None = None
         self._prefetch_timer: asyncio.Task[None] | None = None
@@ -437,7 +442,7 @@ class GuildPlayer:
             if not started:
                 started = True
                 log.info("[%s] ▶ %s (%s)", self.guild.name, track.title, track.id)
-                await self.update_panel(new_track=True)
+                spawn(self.update_panel(new_track=True))  # не чекаємо: панель може стояти в черзі до 2.5 с
                 self._schedule_prefetch(track)
             else:
                 spawn(self.update_panel())  # після перемотування або повторного запиту стріму
@@ -579,49 +584,82 @@ class GuildPlayer:
     # ---------- панель «Зараз грає» ----------
 
     async def update_panel(self, *, new_track: bool = False, resend: bool = False) -> None:
+        """Оновити панель «Зараз грає».
+
+        Часті виклики (кнопки, Activity, прогрес) зливаються: у черзі щонайбільше одне оновлення, а між
+        редагуваннями — щонайменше PANEL_MIN_INTERVAL с. Без цього Discord відповідав 429, а запити, що
+        чекали під замком, бот потім ще довго «доганяв». Оновлення з черги малює найсвіжіший стан.
+        """
         if self.closing or self.current is None:
             return
-        async with self._panel_lock:
-            view = NowPlayingPanel(self)
-            if self.bot.stations.get(self.guild.id):
-                # Є музичний канал — панель живе там, завжди одне й те саме повідомлення.
-                message = await self.bot.stations.show(self.guild, view)
-                if message is not None:
-                    self.panel = message
+        self._panel_new_track |= new_track
+        self._panel_resend |= resend
+        if self._panel_waiting:
+            return  # оновлення вже чекає своєї черги — воно покаже і цю зміну
+        self._panel_waiting = True
+        started = False
+        try:
+            async with self._panel_lock:
+                delay = PANEL_MIN_INTERVAL - (time.monotonic() - self._panel_edited_at)
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                # З цього моменту нові виклики ставлять наступне оновлення, а це малює стан «на зараз».
+                self._panel_waiting = False
+                started = True
+                new_track, self._panel_new_track = self._panel_new_track, False
+                resend, self._panel_resend = self._panel_resend, False
+                if self.closing or self.current is None:
                     return
-            panel = self.panel
-            resend = (
-                resend
-                or panel is None
-                or panel.channel.id != getattr(self.text_channel, "id", None)
-                or (new_track and self.messages_since_panel >= PANEL_RESEND_AFTER)
-            )
-            if not resend and panel is not None:
                 try:
-                    self.panel = await panel.edit(view=view, allowed_mentions=NO_PINGS, **legacy_edit_kwargs(panel))
-                    return
-                except discord.NotFound:
-                    pass  # панель видалили — надішлемо нову
-                except discord.HTTPException as exc:
-                    if panel.flags.components_v2:
-                        log.warning("Не вдалося оновити панель на %s: %s", self.guild.id, exc)
-                        return
-                    # Стару embed-панель Discord не дав перетворити на Components V2 — замінимо новою.
-                    log.info(
-                        "[%s] Стару embed-панель не вдалося перетворити на V2 (%s) — надсилаю нову",
-                        self.guild.name,
-                        exc,
-                    )
-            if panel is not None:
-                with contextlib.suppress(discord.HTTPException):
-                    await panel.delete()
-            try:
-                self.panel = await self.text_channel.send(view=view, allowed_mentions=NO_PINGS)
-            except discord.HTTPException as exc:
-                log.warning("Не можу надіслати панель на %s: %s", self.guild.id, exc)
-                self.panel = None
+                    await self._render_panel(new_track=new_track, resend=resend)
+                finally:
+                    self._panel_edited_at = time.monotonic()
+        finally:
+            if not started:
+                self._panel_waiting = False  # скасували, поки чекали черги
+
+    async def _render_panel(self, *, new_track: bool, resend: bool) -> None:
+        """Одне редагування (або перевідправлення) панелі. Викликати лише під _panel_lock."""
+        view = NowPlayingPanel(self)
+        if self.bot.stations.get(self.guild.id):
+            # Є музичний канал — панель живе там, завжди одне й те саме повідомлення.
+            message = await self.bot.stations.show(self.guild, view)
+            if message is not None:
+                self.panel = message
                 return
-            self.messages_since_panel = 0
+        panel = self.panel
+        resend = (
+            resend
+            or panel is None
+            or panel.channel.id != getattr(self.text_channel, "id", None)
+            or (new_track and self.messages_since_panel >= PANEL_RESEND_AFTER)
+        )
+        if not resend and panel is not None:
+            try:
+                self.panel = await panel.edit(view=view, allowed_mentions=NO_PINGS, **legacy_edit_kwargs(panel))
+                return
+            except discord.NotFound:
+                pass  # панель видалили — надішлемо нову
+            except discord.HTTPException as exc:
+                if panel.flags.components_v2:
+                    log.warning("Не вдалося оновити панель на %s: %s", self.guild.id, exc)
+                    return
+                # Стару embed-панель Discord не дав перетворити на Components V2 — замінимо новою.
+                log.info(
+                    "[%s] Стару embed-панель не вдалося перетворити на V2 (%s) — надсилаю нову",
+                    self.guild.name,
+                    exc,
+                )
+        if panel is not None:
+            with contextlib.suppress(discord.HTTPException):
+                await panel.delete()
+        try:
+            self.panel = await self.text_channel.send(view=view, allowed_mentions=NO_PINGS)
+        except discord.HTTPException as exc:
+            log.warning("Не можу надіслати панель на %s: %s", self.guild.id, exc)
+            self.panel = None
+            return
+        self.messages_since_panel = 0
 
     async def _render_idle(self) -> None:
         if self.closing:
@@ -629,6 +667,7 @@ class GuildPlayer:
         if self.bot.stations.get(self.guild.id):
             async with self._panel_lock:
                 await self.bot.stations.show_welcome(self.guild, self.last_action or "черга закінчилась — напиши ще 🎧")
+                self._panel_edited_at = time.monotonic()
             return
         if self.panel is None:
             return
@@ -637,6 +676,7 @@ class GuildPlayer:
                 await self.panel.edit(
                     view=panels.idle(self), allowed_mentions=NO_PINGS, **legacy_edit_kwargs(self.panel)
                 )
+            self._panel_edited_at = time.monotonic()
 
     async def _progress_loop(self) -> None:
         while not self.closing:
