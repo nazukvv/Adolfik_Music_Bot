@@ -1,0 +1,14 @@
+[Unit]
+Description=Adolfik Activity tunnel (Cloudflare Quick Tunnel)
+After=network-online.target adolfik.service
+Wants=network-online.target
+
+[Service]
+User=__USER__
+# Порт має збігатися з WEB_PORT у .env (за замовчуванням 8080).
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8080
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

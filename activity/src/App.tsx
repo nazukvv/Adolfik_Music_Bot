@@ -1,6 +1,6 @@
 import { Disc3, Search, Wifi, WifiOff } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { CompactPlayer } from "./components/CompactPlayer";
 import { Logo } from "./components/Logo";
 import { MiniPlayer } from "./components/MiniPlayer";
@@ -9,10 +9,10 @@ import { SearchBox } from "./components/SearchBox";
 import { SearchPanel } from "./components/SearchPanel";
 import { Fatal, GuildPicker, Splash } from "./components/Shell";
 import { Toasts } from "./components/Toasts";
-import { control } from "./lib/actions";
+import { control, summon } from "./lib/actions";
 import { api, ApiError, setGuild } from "./lib/api";
 import { connectDiscord, DiscordStartError } from "./lib/discord";
-import { inDiscord, urlGuild } from "./lib/env";
+import { activityChannelId, inDiscord, urlChannel, urlGuild } from "./lib/env";
 import { useMediaQuery } from "./lib/hooks";
 import { perms as computePerms } from "./lib/perms";
 import { live, useLive } from "./lib/store";
@@ -113,6 +113,8 @@ function Layout({ state, online }: { state: GuildState; online: boolean }) {
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<"search" | "now">("search");
   useShortcuts(perms.canControl && !!state.player?.current);
+  // У Discord канал Activity дає SDK; у браузері його можна задати через ?channel=<id> (для перевірки).
+  useAutoSummon(state, inDiscord || urlChannel ? activityChannelId() : null);
 
   if (compact) {
     return (
@@ -197,6 +199,20 @@ function Layout({ state, online }: { state: GuildState; online: boolean }) {
       <Toasts />
     </div>
   );
+}
+
+/**
+ * Бот сам заходить у войс, де відкрили Activity, — якщо зараз ніде не грає, а користувач сидить у цьому
+ * каналі. Один раз за запуск: якщо потім бота вигнали, кличемо його кнопкою.
+ */
+function useAutoSummon(state: GuildState, channelId: string | null) {
+  const tried = useRef(false);
+  useEffect(() => {
+    if (tried.current || !channelId) return;
+    if (state.voice_channel || !state.you.can_summon || state.you.voice_channel_id !== channelId) return;
+    tried.current = true;
+    void summon(channelId);
+  }, [state, channelId]);
 }
 
 /** Пробіл — пауза/відтворення, «/» — до пошуку (коли не друкуєш у полі). */

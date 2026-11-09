@@ -20,3 +20,6 @@ activity/node_modules/
 activity/dist/
 activity/.env
 activity/.env.local
+
+# Локальні бекапи
+_backup*/
