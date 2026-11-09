@@ -8,7 +8,7 @@ import enum
 import logging
 import random
 import time
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any
 
 import discord
@@ -107,7 +107,8 @@ class GuildPlayer:
         self._play_error: Exception | None = None
         self._skip = False
         self._stop = False
-        self._restart = False  # ⏮: заграти поточний трек з початку
+        self._seek_to: float | None = None  # ⏮ / перемотування: з якої секунди перезапустити трек
+        self._pause_after_seek = False
         self._auto_paused = False
         self.closing = False
         self._panel_lock = asyncio.Lock()
@@ -127,6 +128,8 @@ class GuildPlayer:
 
     @property
     def is_paused(self) -> bool:
+        if self._seek_to is not None:
+            return self._pause_after_seek  # трек перезапускається з нової секунди — показуємо запитаний стан
         vc = self.voice
         return bool(vc and vc.is_paused())
 
@@ -147,6 +150,12 @@ class GuildPlayer:
     @last_action.setter
     def last_action(self, text: str | None) -> None:
         self._last_action = (text, time.monotonic()) if text else None
+        self._notify()
+
+    def _notify(self) -> None:
+        """Стан плеєра змінився — повідомити підписників (Activity) через PlayerManager."""
+        if not self.closing:
+            self.bot.players.notify(self.guild.id)
 
     def upcoming(self) -> Track | None:
         """Що заграє після поточного треку з урахуванням режиму повтору."""
@@ -190,6 +199,7 @@ class GuildPlayer:
         if tracks:
             self._wake.set()
             self._ensure_prefetch()
+            self._notify()
         return position, len(tracks)
 
     def toggle_pause(self) -> bool | None:
@@ -198,11 +208,18 @@ class GuildPlayer:
         if vc is None:
             return None
         self._auto_paused = False
+        if self._seek_to is not None:
+            # Трек саме перезапускається з нової секунди: пауза застосується, щойно він заграє.
+            self._pause_after_seek = not self._pause_after_seek
+            self._notify()
+            return self._pause_after_seek
         if vc.is_paused():
             vc.resume()
+            self._notify()
             return False
         if vc.is_playing():
             vc.pause()
+            self._notify()
             return True
         return None
 
@@ -214,6 +231,7 @@ class GuildPlayer:
         vc = self.voice
         if vc and (vc.is_playing() or vc.is_paused()):
             vc.stop()
+        self._notify()
         return True
 
     def stop(self) -> None:
@@ -224,19 +242,34 @@ class GuildPlayer:
         vc = self.voice
         if vc and (vc.is_playing() or vc.is_paused()):
             vc.stop()
+        self._notify()
 
-    def restart(self) -> bool:
-        """⏮ Поточний трек — з початку (той самий стрім, новий ffmpeg з 0:00)."""
+    def seek(self, seconds: float) -> bool:
+        """Перемотати поточний трек: той самий (ще свіжий) стрім, новий ffmpeg з `-ss`.
+
+        Пауза зберігається: якщо трек стояв на паузі, після перемотування він теж стоїть.
+        """
         vc = self.voice
         track = self.current
         if track is None or track.is_live or self.source is None or vc is None:
             return False
-        if not (vc.is_playing() or vc.is_paused()):
+        pending = self._seek_to is not None  # попереднє перемотування ще виконується
+        if not pending and not (vc.is_playing() or vc.is_paused()):
             return False
-        self._restart = True
+        target = max(0.0, float(seconds))
+        if track.duration:
+            target = min(target, max(0.0, track.duration - 1.0))
+        if not pending:
+            self._pause_after_seek = vc.is_paused() and not self._auto_paused
+        self._seek_to = target
         self._auto_paused = False
-        vc.stop()  # _play_track побачить _restart і запустить трек з 0:00
+        if not pending:
+            vc.stop()  # _play_track побачить _seek_to і запустить трек з потрібної секунди
         return True
+
+    def restart(self) -> bool:
+        """⏮ Поточний трек — з початку."""
+        return self.seek(0)
 
     def jump(self, position: int, track_id: str | None = None) -> Track | None:
         """Перейти на трек із черги (1 = наступний): прибрати треки перед ним і скіпнути поточний.
@@ -256,17 +289,30 @@ class GuildPlayer:
             self.queue.extend(skipped)
         if not self.skip():
             self._wake.set()
+        self._notify()
         return target
+
+    def move(self, from_pos: int, to_pos: int) -> Track | None:
+        """Перемістити трек у черзі (позиції з 1)."""
+        if not (1 <= from_pos <= len(self.queue) and 1 <= to_pos <= len(self.queue)):
+            return None
+        track = self.queue.pop(from_pos - 1)
+        self.queue.insert(to_pos - 1, track)
+        self._ensure_prefetch()
+        self._notify()
+        return track
 
     def set_volume(self, value: int) -> int:
         self.volume = max(0, min(MAX_VOLUME, value))
         if self.source:
             self.source.volume = self.volume / 100
+        self._notify()
         return self.volume
 
     def set_loop(self, mode: LoopMode) -> LoopMode:
         self.loop_mode = mode
         self._ensure_prefetch()
+        self._notify()
         return mode
 
     def cycle_loop(self) -> LoopMode:
@@ -275,12 +321,14 @@ class GuildPlayer:
     def shuffle(self) -> int:
         random.shuffle(self.queue)
         self._ensure_prefetch()
+        self._notify()
         return len(self.queue)
 
     def remove(self, position: int) -> Track | None:
         if 1 <= position <= len(self.queue):
             track = self.queue.pop(position - 1)
             self._ensure_prefetch()
+            self._notify()
             return track
         return None
 
@@ -292,6 +340,7 @@ class GuildPlayer:
                 if not self.queue:
                     self.current = None
                     self.source = None
+                    self._notify()
                     await self._render_idle()
                     self._wake.clear()
                     try:
@@ -306,7 +355,9 @@ class GuildPlayer:
                     return
 
                 track = self.queue.pop(0)
-                self._skip = self._stop = self._restart = False
+                self._skip = self._stop = False
+                self._seek_to = None
+                self._pause_after_seek = False
                 played = await self._play_track(track)
                 if self._stop or self.closing or not played:
                     continue
@@ -351,12 +402,13 @@ class GuildPlayer:
 
         start_at = 0.0
         retried = False
+        started = False
         source: TrackedSource | None = None
         while True:
             if not await self._wait_until_available(stream):
                 color_task.cancel()
                 return False
-            if not retried:
+            if not started:
                 self.color = await color_task  # колір рахувався паралельно з очікуванням
             vc = self.voice
             if vc is None or not vc.is_connected():
@@ -379,18 +431,24 @@ class GuildPlayer:
                 source.cleanup()
                 await self._report_error(track, f"Не вдалося почати відтворення: {exc}")
                 return False
-            if not retried:
+            if self._pause_after_seek:
+                self._pause_after_seek = False
+                vc.pause()
+            if not started:
+                started = True
                 log.info("[%s] ▶ %s (%s)", self.guild.name, track.title, track.id)
                 await self.update_panel(new_track=True)
                 self._schedule_prefetch(track)
+            else:
+                spawn(self.update_panel())  # після перемотування або повторного запиту стріму
+            self._notify()
 
             await self._track_end.wait()
             if self._skip or self._stop or self.closing:
                 return True
-            if self._restart:
-                # ⏮: той самий (ще свіжий) стрім, але з 0:00; панель і передзавантаження оновляться як для нового треку.
-                self._restart = False
-                start_at = 0.0
+            if self._seek_to is not None:
+                # ⏮ / перемотування: той самий стрім, ffmpeg з потрібної секунди (як при відновленні обриву).
+                start_at, self._seek_to = self._seek_to, None
                 continue
 
             position = source.position
@@ -650,6 +708,28 @@ class PlayerManager:
         self.bot = bot
         self._players: dict[int, GuildPlayer] = {}
         self._locks: dict[int, asyncio.Lock] = {}
+        self._listeners: list[Callable[[int], None]] = []
+
+    # ---------- підписка на зміни (Activity) ----------
+
+    def subscribe(self, callback: Callable[[int], None]) -> Callable[[], None]:
+        """callback(guild_id) викликається при будь-якій зміні плеєра на сервері: трек, пауза, черга,
+        гучність, повтор, підключення/вихід бота. Має бути швидким і не блокувати (лише позначити «змінилось»).
+        Повертає функцію відписки."""
+        self._listeners.append(callback)
+
+        def unsubscribe() -> None:
+            with contextlib.suppress(ValueError):
+                self._listeners.remove(callback)
+
+        return unsubscribe
+
+    def notify(self, guild_id: int) -> None:
+        for callback in list(self._listeners):
+            try:
+                callback(guild_id)
+            except Exception:
+                log.exception("Помилка підписника плеєра")
 
     def get(self, guild_id: int | None) -> GuildPlayer | None:
         if guild_id is None:
@@ -681,6 +761,7 @@ class PlayerManager:
             else:
                 player.text_channel = text_channel
             player.on_voice_change()
+            self.notify(guild.id)
             return player
 
     async def destroy(self, guild_id: int, reason: str | None = None) -> None:
@@ -688,6 +769,7 @@ class PlayerManager:
         if player:
             log.info("[%s] Плеєр закрито: %s", player.guild.name, reason)
             await player.close(reason)
+            self.notify(guild_id)
             return
         guild = self.bot.get_guild(guild_id)
         if guild and guild.voice_client:

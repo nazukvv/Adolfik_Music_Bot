@@ -23,6 +23,8 @@
 - Помилки бачить тільки той, хто викликав команду (ephemeral).
 - Автовихід: якщо в каналі нікого 2 хвилини (поки нікого — музика на паузі, хтось повернувся — грає далі)
   або черга порожня 5 хвилин.
+- **Discord Activity** — плеєр у стилі музичного стрімінгу просто в голосовому каналі: пошук, обкладинки,
+  черга з перетягуванням, керування для всіх у войсі (див. розділ «Discord Activity» нижче).
 
 ## Що потрібно
 
@@ -30,8 +32,9 @@
 |---|---|
 | Windows 11, **Python 3.14** | [python.org](https://www.python.org/downloads/) (при встановленні постав галочку *Add to PATH*) |
 | **Git** | `discord.py` ставиться останньою версією з GitHub — [git-scm.com](https://git-scm.com) |
-| **Node.js** (LTS) або **Deno** | yt-dlp розв'язує ними JS-челенджі YouTube — [nodejs.org](https://nodejs.org) |
+| **Node.js** (LTS) або **Deno** | yt-dlp розв'язує ними JS-челенджі YouTube; Node.js також збирає фронтенд Activity — [nodejs.org](https://nodejs.org) |
 | **ffmpeg** | лежить у `bin\ffmpeg.exe` (взятий з MusicBot). Якщо його нема — бот візьме `ffmpeg` з PATH |
+| **cloudflared** (для Activity) | тунель, через який Discord відкриває Activity — `winget install --id Cloudflare.cloudflared` |
 
 ## 1. Створи бота в Discord Developer Portal
 
@@ -172,6 +175,13 @@ Adolfik/
 ├─ stations.py       # музичний канал: налаштування і його панель
 ├─ cogs/music.py     # slash-команди і події
 ├─ cogs/station.py   # /setup, /unsetup, обробка повідомлень у музичному каналі
+├─ webapi/           # бекенд Discord Activity у процесі бота
+│  ├─ server.py      # REST API, WebSocket стану, роздача activity/dist
+│  ├─ state.py       # стан плеєра у JSON
+│  └─ auth.py        # підписані сесії
+├─ activity/         # фронтенд Activity: Vite + React + TypeScript + Tailwind + Discord SDK
+│  ├─ src/           # компоненти (пошук, «Зараз грає», черга, міні-плеєр) і lib/ (API, живий стан, SDK)
+│  └─ scripts/needs-build.mjs  # чи треба перезбирати (для start.bat)
 ├─ ui/
 │  ├─ panels.py      # картки Components V2: «Зараз грає», музичний канал, «відключився»
 │  ├─ embeds.py      # embed-и відповідей (додано в чергу, помилки, /queue, /search)
@@ -179,7 +189,8 @@ Adolfik/
 │  ├─ colors.py      # домінантний колір мініатюри
 │  └─ checks.py      # перевірка «той самий войс», ephemeral-помилки
 ├─ bin/ffmpeg.exe
-├─ requirements.txt  ├─ .env.example  └─ start.bat
+├─ requirements.txt  ├─ .env.example  ├─ start.bat
+└─ tunnel.bat        # тунель Cloudflare для Activity
 ```
 
 ## 🎶 Музичний канал (без команд)
@@ -192,3 +203,120 @@ Adolfik/
 
 Боту в цьому каналі потрібне право **Manage Messages**, щоб прибирати повідомлення.
 Вимкнути — **/unsetup** (канал залишиться). Налаштування зберігаються в `data/stations.json`.
+
+## 🎧 Discord Activity — плеєр просто в голосовому каналі
+
+Веб-інтерфейс у стилі музичного стрімінгу, що відкривається всередині Discord у войсі: пошук із підказками,
+обкладинки, черга з перетягуванням, міні-плеєр. Звук, як і раніше, грає бот у войсі — Activity лише керує ним,
+а стан наживо однаковий у всіх, хто її відкрив.
+
+### Як це влаштовано
+
+- **Бекенд** — у процесі бота (`webapi/`, aiohttp, той самий event loop, прямий доступ до плеєра). REST API +
+  WebSocket `/api/ws`: повний стан при кожній зміні (трек, пауза, черга, гучність, повтор) і позиція раз на 1,5 с
+  (між оновленнями фронтенд рахує її сам). Слухає тільки `127.0.0.1:WEB_PORT`.
+- **Фронтенд** — `activity/` (Vite, React, TypeScript, Tailwind, Discord Embedded App SDK). Збірку `activity/dist`
+  роздає той самий бекенд; `start.bat` перезбирає її сам, коли змінився код (потрібен Node.js).
+- **Назовні** — тунель Cloudflare (`tunnel.bat`). Discord ходить до нього через свій проксі
+  `https://<CLIENT_ID>.discordsays.com` за URL mappings.
+- **Вхід** — SDK просить дозвіл (лише `identify`: ім'я й аватар) → бекенд обмінює код на токен через
+  `DISCORD_CLIENT_SECRET` → видає свою підписану сесію на 12 годин.
+- **Права як у кнопках панелі**: дивитися може будь-хто з сервера, керувати — тільки той, хто сидить у тому ж
+  войсі, що й бот.
+
+Без `DISCORD_CLIENT_SECRET` (і без `DEV_MODE`) веб-сервер не запускається — бот працює як звичайно.
+
+### Налаштування (один раз)
+
+1. Встанови cloudflared (після встановлення відкрий новий термінал):
+   ```bat
+   winget install --id Cloudflare.cloudflared
+   ```
+2. Developer Portal → твій застосунок → **OAuth2**:
+   - *Client Secret* → **Reset Secret** → скопіюй (бот використовує лише токен, його це не зачепить);
+   - *Redirects* → **Add Redirect** → `https://127.0.0.1` → **Save** (заглушка, якої вимагає Discord).
+3. У `.env` бота:
+   ```
+   DISCORD_CLIENT_SECRET=<секрет із кроку 2>
+   SESSION_SECRET=<довгий випадковий рядок>
+   DEV_MODE=0
+   ```
+   `SESSION_SECRET` можна згенерувати: `.venv\Scripts\python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+   Без нього сесії скидатимуться при кожному перезапуску бота.
+4. **Installation** → *Installation Contexts*: **Guild Install**.
+5. **Activities → Settings**: увімкни Activities, у *Supported Platforms* відміть Desktop, Web, iOS і Android.
+   Discord створить команду запуску «Launch» (Entry Point) — бот зберігає її під час синхронізації slash-команд.
+
+### Запуск
+
+1. **`start.bat`** — бот (і збірка фронтенду, якщо треба). У лозі має з'явитися
+   `Activity: веб-сервер на http://127.0.0.1:8080 (фронтенд зібрано)`.
+2. **`tunnel.bat`** — у вікні з'явиться адреса `https://xxxx.trycloudflare.com`.
+3. Developer Portal → **Activities → URL Mappings**:
+
+   | PREFIX | TARGET |
+   |---|---|
+   | `/` | `xxxx.trycloudflare.com` (адреса з кроку 2, без `https://`) |
+   | `/ytimg` | `i.ytimg.com` (обкладинки YouTube) |
+   | `/dcdn` | `cdn.discordapp.com` (аватари) |
+
+   Безкоштовний тунель дає нову адресу при кожному запуску `tunnel.bat` — тоді онови рядок `/`.
+   Для постійної адреси потрібен іменований тунель зі своїм доменом у Cloudflare.
+4. У Discord: Налаштування → Розширені → **Режим розробника**. Зайди у войс → кнопка Activities (ракета) →
+   **Adolfik**. При першому запуску дозволь доступ.
+
+### Хто може запускати
+
+Поки застосунок не верифікований Discord, Activity запускається **лише на серверах, де менше 25 учасників**, і
+лише для розробників застосунку та запрошених **App Testers** (до 50; кожен вмикає *Application Test Mode* у
+розширених налаштуваннях Discord). Для більших серверів потрібна верифікація застосунку.
+
+### Керування
+
+- **Пошук**: підказки під час набору, Enter — усі результати; посилання YouTube можна вставити прямо в поле.
+- **Картка треку**: «▶ Грати зараз» (замість поточного) або «+ У чергу».
+- **Черга**: перетягуй за ⋮⋮, ✕ — прибрати, клік по треку — перейти на нього.
+- **Міні-плеєр**: ⏮ спочатку, ⏯, ⏭, клік по смузі прогресу — перемотати, гучність (клік по іконці — без звуку),
+  повтор, перемішати.
+- **Клавіші**: Пробіл — пауза/відтворення, `/` — до пошуку.
+- Маленьке вікно Activity — компактний плеєр; на телефоні — вкладки «Пошук» і «Зараз грає».
+
+### Розробка без Discord
+
+1. У `.env`: `DEV_MODE=1` і `DEV_USER_ID=<твій Discord ID>` (ПКМ по собі → *Копіювати ID*).
+2. `start.bat`, зайди у войс і відкрий у браузері <http://127.0.0.1:8080> (вибір сервера) або
+   `http://127.0.0.1:8080/?guild=<id>`. `&user=<id>` — від імені іншого учасника.
+3. Гаряче перезавантаження: при запущеному боті `cd activity`, `npm run dev` → <http://127.0.0.1:5173>
+   (Vite проксує `/api` і WebSocket на бота).
+
+> ⚠️ `DEV_MODE` вимикає вхід через Discord. **Ніколи не запускай його разом із тунелем.** Бекенд і так не приймає
+> DEV-запити, що прийшли через тунель, але не покладайся на це.
+
+### API
+
+Усі запити — з заголовком `Authorization: Bearer <сесія>` (у `DEV_MODE` — `?user=<id>`).
+
+| Метод | Шлях | Що робить |
+|---|---|---|
+| POST | `/api/token` | обмін OAuth2-коду з SDK на `access_token` і сесію |
+| GET | `/api/state?guild=` | стан плеєра і права користувача (`you.can_control`) |
+| GET | `/api/search?q=` | пошук YouTube (до 20 результатів, з кешем) |
+| POST | `/api/play` | `{guild, query або url, mode: queue / next / now}` |
+| POST | `/api/control` | `{guild, action, value?}`: pause, resume, toggle, skip, stop, previous_restart, seek, volume, loop, shuffle |
+| POST | `/api/queue/move` · `/remove` · `/jump` | `{guild, index (from/to), id}` — індекси з 0; `id` рятує, якщо черга встигла зсунутись |
+| POST | `/api/summon` | `{guild, channel_id}` — покликати бота у войс |
+| WS | `/api/ws?guild=` | перше повідомлення `{"type":"auth","session":"…"}`, далі сервер шле `state` і `position` |
+
+### Якщо Activity не працює
+
+- **Порожній екран або не відкривається** — чи запущені бот і `tunnel.bat`? Рядок `/` у URL Mappings — поточна
+  адреса тунелю, без `https://`?
+- **«Activity не налаштована»** — нема `DISCORD_CLIENT_SECRET` у `.env` (після зміни перезапусти бота).
+- **«Discord не прийняв код авторизації»** — неправильний Client Secret.
+- **«Discord не відповідає»** — закрий і знову відкрий Activity; `Ctrl+R` у клієнті Discord.
+- **Нема обкладинок чи аватарів** — бракує mappings `/ytimg` і `/dcdn`.
+- **«Сесія недійсна» після перезапуску бота** — задай `SESSION_SECRET`, тоді сесії переживуть перезапуск.
+- **«Бота нема на цьому сервері»** — запроси бота (посилання-запрошення друкується в лозі при старті).
+- **У лозі «не вдалося запустити веб-сервер … Порт зайнятий?»** — зміни `WEB_PORT` і перезапусти `tunnel.bat`.
+- **Activity нема в списку** — Activities увімкнені? На сервері менше 25 учасників? Ти розробник або App Tester?
+  Режим розробника увімкнено?

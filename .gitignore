@@ -14,3 +14,9 @@ data/
 # Бінарники ffmpeg (~85 МБ) — не тримаємо в git
 bin/*.exe
 .ruff_cache/
+
+# Activity (фронтенд): залежності і збірка
+activity/node_modules/
+activity/dist/
+activity/.env
+activity/.env.local

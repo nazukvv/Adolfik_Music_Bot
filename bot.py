@@ -17,6 +17,7 @@ import re
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any
 
 import discord
 from discord import app_commands
@@ -30,6 +31,7 @@ from ui.checks import reply_error
 from ui.colors import ColorPicker
 from ui.panels import NowPlayingPanel
 from ui.views import LegacyPanelButtons
+from webapi.server import ActivityServer
 from youtube import YouTube
 
 log = logging.getLogger("adolfik")
@@ -38,6 +40,26 @@ DAVEY_MIN = (0, 1, 7)
 DAVEY_MAX_EXCLUSIVE = (0, 2)
 SYNC_TIMEOUT = 60
 SYNC_STAMP = BASE_DIR / "data" / "commands.sha256"
+
+
+ENTRY_POINT_TYPE = 4  # PRIMARY_ENTRY_POINT — команда запуску Activity, яку створює Discord
+_ENTRY_POINT_KEYS = (
+    "name",
+    "type",
+    "description",
+    "handler",
+    "integration_types",
+    "contexts",
+    "default_member_permissions",
+    "nsfw",
+    "name_localizations",
+    "description_localizations",
+)
+
+
+def _entry_point_payload(command: dict[str, Any]) -> dict[str, Any]:
+    """Entry Point-команда з Discord у вигляді, придатному для bulk overwrite (без id/version/application_id)."""
+    return {k: command[k] for k in _ENTRY_POINT_KEYS if command.get(k) is not None}
 
 
 def _read_text(path: Path) -> str | None:
@@ -165,6 +187,7 @@ class Adolfik(commands.Bot):
         self.colors = ColorPicker(settings.embed_color)
         self.players = PlayerManager(self)
         self.stations = StationManager(self)
+        self.web = ActivityServer(self)  # Discord Activity: API + WebSocket + фронтенд
         self.tree.error(self._on_app_command_error)
         self._background: set[asyncio.Task[None]] = set()
 
@@ -175,6 +198,7 @@ class Adolfik(commands.Bot):
         # Persistent: кнопки й меню черги працюють і на панелях, надісланих до перезапуску бота.
         self.add_view(NowPlayingPanel())
         self.add_view(LegacyPanelButtons())  # «📜 Черга» на старих embed-панелях
+        await self.web.start()  # той самий event loop: API має прямий доступ до bot.players і bot.yt
         # Синхронізація у фоні: якщо Discord притримає її rate limit-ом, бот однаково підключиться.
         self._sync_task = asyncio.create_task(self._sync_commands())
         if not self.check_only:
@@ -182,7 +206,19 @@ class Adolfik(commands.Bot):
             self._background.add(task)
             task.add_done_callback(self._background.discard)
 
+    async def _remote_commands(self, guild: discord.abc.Snowflake | None) -> list[dict[str, Any]]:
+        assert self.application_id is not None
+        if guild is None:
+            return list(await self.http.get_global_commands(self.application_id))
+        return list(await self.http.get_guild_commands(self.application_id, guild.id))
+
     async def _sync_commands(self) -> None:
+        """Синхронізація slash-команд, яка не видаляє Entry Point-команду Activity.
+
+        Коли в Developer Portal увімкнено Activities, Discord створює команду типу PRIMARY_ENTRY_POINT
+        («Launch»). discord.py про неї не знає, а масове перезаписування без неї Discord відхиляє,
+        тому беремо її з Discord і додаємо в payload як є.
+        """
         guild = discord.Object(id=self.settings.guild_id) if self.settings.guild_id else None
         if guild:
             self.tree.copy_global_to(guild=guild)
@@ -197,18 +233,21 @@ class Adolfik(commands.Bot):
 
         try:
             async with asyncio.timeout(SYNC_TIMEOUT):
-                if _read_text(SYNC_STAMP) == digest:
-                    # Набір команд не змінився з минулої синхронізації — перевіряємо, що в Discord він той самий,
-                    # і не робимо зайвий PUT (часті глобальні синхронізації Discord обмежує).
-                    remote = await self.tree.fetch_commands(guild=guild)
-                    if sorted(c.name for c in remote) == names:
-                        log.info(
-                            "Slash-команди вже актуальні: %d %s — повторна синхронізація не потрібна",
-                            len(remote),
-                            scope,
-                        )
-                        return
-                synced = await self.tree.sync(guild=guild)
+                remote = await self._remote_commands(guild)
+                entry_points = [c for c in remote if c.get("type") == ENTRY_POINT_TYPE]
+                remote_names = sorted(c["name"] for c in remote if c.get("type") != ENTRY_POINT_TYPE)
+                if _read_text(SYNC_STAMP) == digest and remote_names == names:
+                    # Набір не змінився і в Discord той самий — зайвий PUT не робимо (Discord обмежує частоту).
+                    log.info(
+                        "Slash-команди вже актуальні: %d %s — повторна синхронізація не потрібна", len(names), scope
+                    )
+                    return
+                payload = local + [_entry_point_payload(c) for c in entry_points]
+                assert self.application_id is not None
+                if guild is None:
+                    await self.http.bulk_upsert_global_commands(self.application_id, payload=payload)
+                else:
+                    await self.http.bulk_upsert_guild_commands(self.application_id, guild.id, payload=payload)
         except TimeoutError:
             log.warning(
                 "Синхронізація slash-команд не вклалась у %d с (схоже, rate limit Discord). "
@@ -221,7 +260,10 @@ class Adolfik(commands.Bot):
             return
         SYNC_STAMP.parent.mkdir(parents=True, exist_ok=True)
         SYNC_STAMP.write_text(digest, encoding="utf-8")
-        log.info("Синхронізовано %d slash-команд %s: %s", len(synced), scope, " ".join(f"/{c.name}" for c in synced))
+        kept = (
+            f" (+ збережено Entry Point Activity: {', '.join(c['name'] for c in entry_points)})" if entry_points else ""
+        )
+        log.info("Синхронізовано %d slash-команд %s: %s%s", len(names), scope, " ".join(f"/{n}" for n in names), kept)
         if guild is None:
             log.info("Глобальні команди можуть з'явитися в клієнтах Discord не одразу (Ctrl+R у Discord прискорює)")
 
@@ -247,12 +289,11 @@ class Adolfik(commands.Bot):
 
     async def _report_registered(self) -> None:
         guild = discord.Object(id=self.settings.guild_id) if self.settings.guild_id else None
-        registered = await self.tree.fetch_commands(guild=guild)
-        log.info(
-            "Перевірка: у Discord зареєстровано %d команд: %s",
-            len(registered),
-            " ".join(sorted(f"/{c.name}" for c in registered)),
+        remote = await self._remote_commands(guild)
+        labels = sorted(
+            f"{c['name']} (Entry Point)" if c.get("type") == ENTRY_POINT_TYPE else f"/{c['name']}" for c in remote
         )
+        log.info("Перевірка: у Discord зареєстровано %d команд: %s", len(remote), " ".join(labels))
 
     async def _on_app_command_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError
@@ -269,6 +310,7 @@ class Adolfik(commands.Bot):
 
     async def close(self) -> None:
         await self.players.shutdown()
+        await self.web.stop()
         await self.colors.close()
         self.yt.close()
         await super().close()

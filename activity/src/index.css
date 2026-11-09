@@ -1,0 +1,136 @@
+@import "tailwindcss";
+
+/* touch: — пристрої без ховера (телефон); hoverable: — з мишею */
+@custom-variant touch (@media (hover: none));
+@custom-variant hoverable (@media (hover: hover));
+/* compact: — маленьке вікно Activity (картинка-в-картинці в Discord) */
+@custom-variant compact (@media (max-height: 420px));
+
+@theme {
+  --color-ink: #030303;
+  --color-base: #0f0f0f;
+  --color-panel: #161616;
+  --color-raise: #1f1f1f;
+  --color-line: #2a2a2a;
+  --color-dim: #a1a1a1;
+  --color-faint: #6b6b6b;
+  --font-sans: "Inter", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, "Roboto", sans-serif;
+  --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Акцент = домінантний колір обкладинки поточного треку (App ставить --accent на <html>). */
+:root {
+  --accent: #8b5cf6;
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-ink);
+  color: #f1f1f1;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+input,
+textarea {
+  user-select: text;
+}
+
+/* Тонкі темні скролбари */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a transparent;
+}
+
+/* ---------- повзунки (прогрес, гучність) ---------- */
+.slider {
+  --fill: 0%;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--accent) var(--fill), rgb(255 255 255 / 0.18) var(--fill));
+  outline: none;
+  cursor: pointer;
+  transition: height 150ms var(--ease-soft);
+}
+.slider:hover,
+.slider:focus-visible {
+  height: 6px;
+}
+.slider:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 35%, transparent);
+  transform: scale(0);
+  transition: transform 150ms var(--ease-soft);
+}
+.slider:hover::-webkit-slider-thumb,
+.slider:focus-visible::-webkit-slider-thumb,
+.slider:active::-webkit-slider-thumb {
+  transform: scale(1);
+}
+.slider:disabled::-webkit-slider-thumb {
+  transform: scale(0);
+}
+.slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+}
+
+/* Еквалайзер «грає зараз» */
+@keyframes eq {
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+.eq > span {
+  display: block;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  transform-origin: bottom;
+  animation: eq 900ms ease-in-out infinite;
+}
+.eq > span:nth-child(2) {
+  animation-delay: -300ms;
+}
+.eq > span:nth-child(3) {
+  animation-delay: -600ms;
+}
+.eq.paused > span {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
 import discord
@@ -28,6 +29,15 @@ AUTOCOMPLETE_TIMEOUT = 2.1  # Discord чекає відповідь автоко
 
 class JoinError(Exception):
     """Не вдалося підключитися або додати треки."""
+
+
+@dataclass(slots=True)
+class EnqueueResult:
+    player: GuildPlayer
+    tracks: list[Track]  # що реально додано (з requester_id)
+    position: int  # позиція першого доданого в черзі (1 = наступний)
+    starting: bool  # нічого не грало — перший трек заграє одразу
+    embed: discord.Embed
 
 
 def _choice_name(track: Track) -> str:
@@ -88,6 +98,12 @@ class Music(commands.Cog):
         self, member: discord.abc.User, text_channel: discord.abc.Messageable, resolved: Resolved
     ) -> discord.Embed:
         """Підключитися до войсу автора і додати треки (використовується і музичним каналом)."""
+        return (await self.enqueue_tracks(member, text_channel, resolved)).embed
+
+    async def enqueue_tracks(
+        self, member: discord.abc.User, text_channel: discord.abc.Messageable, resolved: Resolved
+    ) -> EnqueueResult:
+        """Те саме, що enqueue, але з подробицями (для Activity)."""
         assert isinstance(member, discord.Member) and member.voice and member.voice.channel
         tracks = [t.for_requester(member.id) for t in resolved.tracks]
 
@@ -123,7 +139,7 @@ class Music(commands.Cog):
             embed = embeds.track_added(tracks[0], position=position, starting=starting, eta=player.eta(position))
         if not starting:
             spawn(player.update_panel())  # оновити «у черзі» і «далі»
-        return embed
+        return EnqueueResult(player=player, tracks=tracks, position=position, starting=starting, embed=embed)
 
     # ---------- /play ----------
 
@@ -382,6 +398,8 @@ class Music(commands.Cog):
         self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState
     ) -> None:
         guild = member.guild
+        if before.channel != after.channel:
+            self.bot.players.notify(guild.id)  # Activity: хто в якому войсі = хто може керувати
         if self.bot.user and member.id == self.bot.user.id:
             if after.channel is None:
                 await asyncio.sleep(2)  # дати discord.py шанс перепідключитися

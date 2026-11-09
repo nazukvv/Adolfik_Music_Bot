@@ -12,6 +12,8 @@ import re
 import shutil
 import threading
 import time
+import urllib.error
+import urllib.request
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -25,7 +27,7 @@ from config import BASE_DIR, COOKIES_FILE
 
 log = logging.getLogger(__name__)
 
-SEARCH_SIZE = 10  # завжди шукаємо 10, щоб кеш підходив і автокомпліту, і /search
+SEARCH_SIZE = 20  # завжди шукаємо 20 (стільки ж часу, що й 10): кеш підходить автокомпліту, /search і Activity
 SEARCH_CACHE_TTL = 15 * 60
 SEARCH_CACHE_MAX = 300
 PLAYLIST_LIMIT = 500
@@ -196,13 +198,33 @@ def _friendly_error(exc: Exception) -> YouTubeError:
     return YouTubeError(msg)
 
 
+def _thumbnail_exists(url: str) -> bool:
+    """yt-dlp перелічує maxresdefault і для старих відео, де його нема; тоді i.ytimg.com віддає 404
+    з картинкою-заглушкою (сірий прямокутник), яку браузер і Discord показали б як «обкладинку»."""
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, method="HEAD"), timeout=3) as resp:
+            return resp.status == 200
+    except (urllib.error.URLError, TimeoutError, ValueError):
+        return False
+
+
 def _best_thumbnail(info: dict[str, Any]) -> str | None:
-    """Найкраща JPG-мініатюра (webp Discord теж показує, але JPG надійніший)."""
+    """Найкраща JPG-мініатюра, що реально існує (webp Discord теж показує, але JPG надійніший).
+
+    Викликається лише в потоках yt-dlp (не в event loop), тож короткі HEAD-перевірки тут дозволені.
+    """
     thumbs = info.get("thumbnails") or []
-    for thumb in reversed(thumbs):  # yt-dlp сортує за зростанням якості
-        url = thumb.get("url") or ""
-        if url.endswith(".jpg") and "vi_webp" not in url:
+    candidates = [
+        url
+        for thumb in reversed(thumbs)  # yt-dlp сортує за зростанням якості
+        if (url := thumb.get("url") or "").endswith(".jpg") and "vi_webp" not in url
+    ]
+    for url in candidates[:3]:
+        if _thumbnail_exists(url):
             return url
+    video_id = info.get("id")
+    if isinstance(video_id, str) and _VIDEO_ID_RE.match(video_id):
+        return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"  # є завжди
     return info.get("thumbnail")
 
 

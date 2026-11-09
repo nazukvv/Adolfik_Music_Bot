@@ -15,6 +15,7 @@ audioop-lts; python_version >= "3.13"
 # [default] включає yt-dlp-ejs (розв'язувач JS-челенджів YouTube; потрібен Node.js або Deno).
 yt-dlp[default]
 
+# aiohttp: HTTP-клієнт і веб-сервер Discord Activity (aiohttp.web, у процесі бота).
 aiohttp>=3.9
 python-dotenv>=1.0
 # Домінантний колір мініатюри для смужки embed.
