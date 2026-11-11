@@ -1,31 +1,85 @@
-import { api, type ControlAction } from "./api";
+import { api, ApiError, type ControlAction, type PlayOptions, type PlayResult } from "./api";
 import { plural } from "./format";
+import { perms } from "./perms";
 import { live } from "./store";
 import { toast, toastError } from "./toasts";
 import type { PlayMode, Track } from "./types";
 
 // Дії користувача: запит до API → одразу застосовуємо стан із відповіді (WS теж його надішле).
+//
+// Бот сам у войс не заходить. Якщо його нема у войсі користувача, кнопки «грати» підписані
+// «Покликати й грати» і шлють summon: true — одна кнопка кличе бота й одразу вмикає музику.
+
+/** Чи треба кликати бота разом із цією дією (рахуємо з живого стану в момент натискання). */
+function needsSummon(): boolean {
+  return perms(live.getSnapshot().state).needsSummon;
+}
+
+function summonedPrefix(summoned: boolean): string {
+  return summoned ? "👋 Бот іде до вас · " : "";
+}
+
+function explain(err: unknown): void {
+  // Стан міг змінитися між рендером і кліком (бота забрали в інший канал) — підкажемо, що робити.
+  if (err instanceof ApiError && err.code === "summon_required") {
+    toast(`${err.message}: натисни «Покликати бота» вгорі`, "error", 5000);
+    live.refresh();
+    return;
+  }
+  toastError(err);
+}
 
 export async function playTrack(track: Pick<Track, "url" | "title">, mode: PlayMode): Promise<void> {
+  const summon = needsSummon();
   try {
-    const res = await api.play({ url: track.url }, mode);
+    const res = await api.play({ url: track.url }, mode, summon);
     live.apply(res.state);
-    if (res.starting || mode === "now") toast(`▶ Грає: ${track.title}`);
-    else if (mode === "next") toast(`⏭ Наступним: ${track.title}`);
-    else toast(`➕ У черзі #${res.position}: ${track.title}`);
+    const prefix = summonedPrefix(summon);
+    if (res.starting || mode === "now") toast(`${prefix}▶ Грає: ${track.title}`);
+    else if (mode === "next") toast(`${prefix}⏭ Наступним: ${track.title}`);
+    else toast(`${prefix}➕ У черзі #${res.position}: ${track.title}`);
   } catch (err) {
-    toastError(err);
+    explain(err);
   }
 }
 
 export async function playQuery(query: string, mode: PlayMode = "queue"): Promise<void> {
+  const summon = needsSummon();
   try {
-    const res = await api.play({ query }, mode);
+    const res = await api.play({ query }, mode, summon);
     live.apply(res.state);
-    toast(res.added > 1 ? `📃 Додано ${plural(res.added, "трек", "треки", "треків")}` : "➕ Додано в чергу");
+    toast(
+      summonedPrefix(summon) +
+        (res.added > 1 ? `📃 Додано ${plural(res.added, "трек", "треки", "треків")}` : "➕ Додано в чергу"),
+    );
   } catch (err) {
-    toastError(err);
+    explain(err);
   }
+}
+
+async function playList(
+  run: (options: PlayOptions) => Promise<PlayResult>,
+  title: string,
+  options: Omit<PlayOptions, "summon">,
+): Promise<void> {
+  const summon = needsSummon();
+  try {
+    const res = await run({ mode: "queue", ...options, summon });
+    live.apply(res.state);
+    const count = plural(res.added, "трек", "треки", "треків");
+    const verb = res.starting || options.mode === "now" ? "▶ Грає" : options.mode === "next" ? "⏭ Наступними" : "➕ У черзі";
+    toast(`${summonedPrefix(summon)}${verb}: «${title}» (${count}${options.shuffle ? ", перемішано" : ""})`);
+  } catch (err) {
+    explain(err);
+  }
+}
+
+export function playLikes(options: Omit<PlayOptions, "summon">): Promise<void> {
+  return playList(api.playLikes, "Улюблені", options);
+}
+
+export function playPlaylist(id: number, name: string, options: Omit<PlayOptions, "summon">): Promise<void> {
+  return playList((o) => api.playPlaylist(id, o), name, options);
 }
 
 export async function control(command: ControlAction): Promise<void> {

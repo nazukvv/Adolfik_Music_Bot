@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { getSession } from "./api";
 import { devUser } from "./env";
-import type { GuildState, PositionMessage, ServerMessage, Track } from "./types";
+import type { GuildState, LibraryEvent, PositionMessage, ServerMessage, Track } from "./types";
 
 export type Connection = "idle" | "connecting" | "open" | "reconnecting" | "failed";
 
@@ -29,6 +29,7 @@ const FATAL = new Set([400, 401, 403, 404]);
 class LiveStore {
   private snap: Snapshot = { state: null, connection: "idle", fatal: null };
   private listeners = new Set<() => void>();
+  private libraryListeners = new Set<(event: LibraryEvent) => void>();
   private base: PositionBase = { pos: 0, at: 0, running: false, duration: null, trackId: null };
   private ws: WebSocket | null = null;
   private guildId = "";
@@ -42,6 +43,12 @@ class LiveStore {
   };
 
   getSnapshot = (): Snapshot => this.snap;
+
+  /** Зміни бібліотеки цього користувача (лайки, плейлисти) — зокрема з кнопки ❤ у Discord. */
+  onLibrary(listener: (event: LibraryEvent) => void): () => void {
+    this.libraryListeners.add(listener);
+    return () => this.libraryListeners.delete(listener);
+  }
 
   private set(patch: Partial<Snapshot>): void {
     this.snap = { ...this.snap, ...patch };
@@ -64,13 +71,13 @@ class LiveStore {
     this.ws = null;
   }
 
-  /** Попросити повний стан (наприклад, після невдалої оптимістичної зміни). */
   /** Зупинитись із фатальною помилкою (наприклад, сесія протухла посеред роботи). */
   fail(message: string): void {
     this.disconnect();
     this.set({ connection: "failed", fatal: message });
   }
 
+  /** Попросити повний стан (наприклад, після невдалої оптимістичної зміни). */
   refresh(): void {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: "state" }));
   }
@@ -99,6 +106,8 @@ class LiveStore {
         if (this.snap.connection !== "open") this.set({ connection: "open" });
       } else if (msg.type === "position") {
         this.onPosition(msg);
+      } else if (msg.type === "library") {
+        for (const listener of this.libraryListeners) listener(msg);
       } else if (msg.type === "error" && FATAL.has(msg.status)) {
         this.stopped = true;
         this.set({ connection: "failed", fatal: msg.error });

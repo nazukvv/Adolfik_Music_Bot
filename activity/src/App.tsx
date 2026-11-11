@@ -1,24 +1,15 @@
-import { Disc3, Search, Wifi, WifiOff } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { type ReactNode, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { CompactPlayer } from "./components/CompactPlayer";
-import { Logo } from "./components/Logo";
-import { MiniPlayer } from "./components/MiniPlayer";
-import { NowPlaying } from "./components/NowPlaying";
-import { SearchBox } from "./components/SearchBox";
-import { SearchPanel } from "./components/SearchPanel";
+import { AppShell } from "./components/layout/AppShell";
 import { Fatal, GuildPicker, Splash } from "./components/Shell";
-import { Toasts } from "./components/Toasts";
-import { control } from "./lib/actions";
 import { api, ApiError, setGuild } from "./lib/api";
 import { connectDiscord, DiscordStartError } from "./lib/discord";
 import { inDiscord, urlGuild } from "./lib/env";
 import { useMediaQuery } from "./lib/hooks";
+import { library } from "./lib/library";
 import { perms as computePerms } from "./lib/perms";
 import { live, useLive } from "./lib/store";
-import type { DevGuild, GuildState } from "./lib/types";
-
-const DEFAULT_ACCENT = "#8b5cf6";
+import type { DevGuild } from "./lib/types";
 
 type Boot =
   | { kind: "loading"; step?: string }
@@ -61,7 +52,11 @@ export function App() {
     if (boot.kind !== "ready") return;
     setGuild(boot.guildId);
     live.connect(boot.guildId);
-    return () => live.disconnect();
+    library.start(); // профіль, лайки, плейлисти — сесія вже є
+    return () => {
+      live.disconnect();
+      library.stop();
+    };
   }, [boot]);
 
   if (boot.kind === "loading") return <Splash text={boot.step} />;
@@ -95,170 +90,17 @@ function discordError(err: unknown): Boot {
 
 function Player() {
   const { state, connection, fatal } = useLive();
-  const accent = state?.player?.color ?? DEFAULT_ACCENT;
-
-  useEffect(() => {
-    document.documentElement.style.setProperty("--accent", accent);
-  }, [accent]);
+  const compact = useMediaQuery("(max-height: 420px)");
 
   if (fatal) return <Fatal title="Немає доступу" text={fatal} onRetry={() => window.location.reload()} />;
   if (!state) return <Splash text={connection === "reconnecting" ? "Перепідключаюсь…" : undefined} />;
-  return <Layout state={state} online={connection === "open"} />;
-}
-
-function Layout({ state, online }: { state: GuildState; online: boolean }) {
-  const perms = computePerms(state);
-  const wide = useMediaQuery("(min-width: 900px)");
-  const compact = useMediaQuery("(max-height: 420px)");
-  const [query, setQuery] = useState("");
-  const [tab, setTab] = useState<"search" | "now">("search");
-  useShortcuts(perms.canControl && !!state.player?.current);
-
   if (compact) {
+    // Маленьке вікно Activity (картинка-в-картинці): лише плеєр.
     return (
-      <div className="relative h-full overflow-hidden bg-ink">
-        <Backdrop />
-        <div className="relative h-full">
-          <CompactPlayer state={state} perms={perms} />
-        </div>
+      <div className="h-full overflow-hidden bg-ink">
+        <CompactPlayer state={state} perms={computePerms(state)} />
       </div>
     );
   }
-
-  const runQuery = (q: string) => {
-    setQuery(q);
-    setTab("search");
-  };
-
-  return (
-    <div className="relative flex h-full flex-col overflow-hidden bg-ink">
-      <Backdrop />
-
-      <header className="relative z-30 flex items-center gap-3 px-3 py-3 sm:gap-5 sm:px-5">
-        <button type="button" onClick={() => setQuery("")} aria-label="На головну">
-          <Logo compact={!wide} />
-        </button>
-        <div className="flex min-w-0 flex-1 justify-center">
-          <SearchBox onSubmit={runQuery} canAdd={perms.canAdd} />
-        </div>
-        <StatusPill state={state} online={online} />
-      </header>
-
-      <AnimatePresence>
-        {!online && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="relative z-20 overflow-hidden"
-          >
-            <div className="mx-3 mb-2 flex items-center gap-2 rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-100 sm:mx-5">
-              <WifiOff className="size-4 shrink-0 text-amber-300" />
-              Зв'язок із ботом втрачено — перепідключаюсь… Стан на екрані може бути застарілим.
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {!wide && (
-        <nav className="relative z-10 flex gap-1 px-3 pb-2">
-          <TabButton active={tab === "search"} onClick={() => setTab("search")}>
-            <Search className="size-4" /> Пошук
-          </TabButton>
-          <TabButton active={tab === "now"} onClick={() => setTab("now")}>
-            <Disc3 className="size-4" /> Зараз грає
-            {state.player && state.player.queue_total > 0 && (
-              <span className="rounded-full bg-white/15 px-1.5 text-[11px] tabular-nums">{state.player.queue_total}</span>
-            )}
-          </TabButton>
-        </nav>
-      )}
-
-      <div className="relative z-0 flex min-h-0 flex-1">
-        {(wide || tab === "search") && (
-          <main className="min-w-0 flex-1 overflow-y-auto px-4 pb-8 sm:px-6">
-            <SearchPanel query={query} onQuery={runQuery} canAdd={perms.canAdd} hint={perms.hint} />
-          </main>
-        )}
-        {(wide || tab === "now") && (
-          <aside
-            className={
-              wide
-                ? "w-[380px] shrink-0 overflow-y-auto border-l border-white/[0.06] bg-black/25 xl:w-[420px]"
-                : "min-w-0 flex-1 overflow-y-auto"
-            }
-          >
-            <NowPlaying state={state} perms={perms} />
-          </aside>
-        )}
-      </div>
-
-      <MiniPlayer state={state} perms={perms} />
-      <Toasts />
-    </div>
-  );
-}
-
-/** Пробіл — пауза/відтворення, «/» — до пошуку (коли не друкуєш у полі). */
-function useShortcuts(canToggle: boolean) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const target = e.target instanceof HTMLElement ? e.target : null;
-      const typing = !!target && (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) || target.isContentEditable);
-      if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key === "/") {
-        e.preventDefault();
-        document.getElementById("search-input")?.focus();
-      } else if (e.code === "Space" && !e.repeat && target?.tagName !== "BUTTON" && canToggle) {
-        e.preventDefault();
-        void control({ action: "toggle" });
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [canToggle]);
-}
-
-/** М'яке світіння кольором обкладинки за всім інтерфейсом. */
-function Backdrop() {
-  return (
-    <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
-      <div className="absolute -top-[45vh] left-1/2 h-[90vh] w-[140vw] -translate-x-1/2 rounded-[50%] bg-[var(--accent)] opacity-[0.17] blur-[120px] transition-colors duration-1000" />
-      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-ink/40 to-ink" />
-    </div>
-  );
-}
-
-function StatusPill({ state, online }: { state: GuildState; online: boolean }) {
-  const voice = state.voice_channel;
-  return (
-    <div
-      className="hidden shrink-0 items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-xs text-dim md:flex"
-      title={online ? "Зв'язок із ботом є" : "Немає зв'язку з ботом — перепідключаюсь"}
-    >
-      {online ? <Wifi className="size-3.5 text-emerald-400" /> : <WifiOff className="size-3.5 text-amber-400" />}
-      <span className="max-w-[10rem] truncate">{state.guild.name}</span>
-      {voice ? (
-        <span className="max-w-[10rem] truncate text-white/80">
-          · 🔊 {voice.name} ({voice.listeners})
-        </span>
-      ) : (
-        <span>· бот не у войсі</span>
-      )}
-    </div>
-  );
-}
-
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`inline-flex flex-1 items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition ${
-        active ? "bg-white text-black" : "bg-white/[0.06] text-dim hover:bg-white/10 hover:text-white"
-      }`}
-    >
-      {children}
-    </button>
-  );
+  return <AppShell state={state} online={connection === "open"} />;
 }

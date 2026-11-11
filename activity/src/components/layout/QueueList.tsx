@@ -16,11 +16,11 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, ListMusic, X } from "lucide-react";
-import { jumpTo, moveInQueue, removeFromQueue } from "../lib/actions";
-import { fmtTime, plural } from "../lib/format";
-import { media } from "../lib/media";
-import type { Track } from "../lib/types";
-import { Cover } from "./Cover";
+import { jumpTo, moveInQueue, removeFromQueue } from "../../lib/actions";
+import { fmtTime, plural } from "../../lib/format";
+import { media } from "../../lib/media";
+import type { Track } from "../../lib/types";
+import { Cover } from "../Cover";
 
 interface Props {
   queue: Track[];
@@ -47,7 +47,7 @@ export function QueueList({ queue, total, duration, canControl }: Props) {
   return (
     <section>
       <header className="mb-2 flex items-baseline justify-between gap-3">
-        <h3 className="text-xs font-semibold tracking-[0.14em] text-dim uppercase">Далі в черзі</h3>
+        <h3 className="text-sm font-semibold">Далі в черзі</h3>
         {total > 0 && (
           <span className="text-xs text-faint tabular-nums">
             {plural(total, "трек", "треки", "треків")} · {fmtTime(duration)}
@@ -56,7 +56,7 @@ export function QueueList({ queue, total, duration, canControl }: Props) {
       </header>
 
       {queue.length === 0 ? (
-        <div className="flex items-center gap-3 rounded-xl border border-dashed border-white/10 px-4 py-5 text-sm text-faint">
+        <div className="flex items-center gap-3 rounded-xl border border-dashed border-white/10 px-4 py-5 text-[13px] text-dim">
           <ListMusic className="size-5 shrink-0" />
           Черга порожня — додай щось із пошуку
         </div>
@@ -99,7 +99,7 @@ function QueueRow({
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={`group relative flex items-stretch gap-2 rounded-xl px-1.5 transition-colors ${
-        isDragging ? "z-10 bg-raise shadow-2xl ring-1 ring-white/10" : "hover:bg-white/[0.06]"
+        isDragging ? "z-10 bg-raise shadow-2xl ring-1 ring-white/10" : "hover:bg-white/[0.05]"
       }`}
     >
       <button
@@ -119,9 +119,9 @@ function QueueRow({
         title={canControl ? "Перейти на цей трек" : track.title}
         className="flex min-w-0 flex-1 items-center gap-3 py-1.5 text-left disabled:cursor-default"
       >
-        <Cover src={track.thumbnail_small} className="h-10 w-[70px] shrink-0" rounded="rounded-lg" />
+        <Cover src={track.thumbnail_small} className="size-10 shrink-0" rounded="rounded-md" />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">{track.title}</span>
+          <span className="block truncate text-[13px] font-semibold">{track.title}</span>
           <span className="flex items-center gap-1.5 text-xs text-dim">
             <span className="truncate">{track.channel ?? "—"}</span>
             <span className="shrink-0 tabular-nums">· {track.is_live ? "наживо" : fmtTime(track.duration)}</span>

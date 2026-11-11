@@ -1,9 +1,10 @@
-import { Headphones, LoaderCircle, Pause, Play, SkipBack, SkipForward } from "lucide-react";
+import { Headphones, SkipBack, SkipForward } from "lucide-react";
 import { control, summon } from "../lib/actions";
 import type { Perms } from "../lib/perms";
 import type { GuildState } from "../lib/types";
 import { Cover } from "./Cover";
-import { IconButton, Progress } from "./MiniPlayer";
+import { PlayPause, SeekBar } from "./layout/Player";
+import { IconButton } from "./ui/Buttons";
 
 /** Маленьке вікно Activity (картинка-в-картинці): лише обкладинка, назва, кнопки й прогрес. */
 export function CompactPlayer({ state, perms }: { state: GuildState; perms: Perms }) {
@@ -21,27 +22,13 @@ export function CompactPlayer({ state, perms }: { state: GuildState; perms: Perm
         </div>
         {current ? (
           <>
-            <Progress player={player} enabled={perms.canControl} inline />
+            <SeekBar player={player} enabled={perms.canControl} />
             <div className="flex items-center gap-1">
-              <IconButton label="Спочатку" disabled={!can || current.is_live} onClick={() => void control({ action: "previous_restart" })}>
+              <IconButton label="Спочатку" size="sm" disabled={!can || current.is_live} onClick={() => void control({ action: "previous_restart" })}>
                 <SkipBack className="size-4 fill-current" />
               </IconButton>
-              <button
-                type="button"
-                disabled={!can}
-                onClick={() => void control({ action: "toggle" })}
-                aria-label={player?.paused ? "Грати" : "Пауза"}
-                className="grid size-9 place-items-center rounded-full bg-white text-black disabled:opacity-40"
-              >
-                {player?.preparing ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : player?.paused ? (
-                  <Play className="ml-0.5 size-4 fill-current" />
-                ) : (
-                  <Pause className="size-4 fill-current" />
-                )}
-              </button>
-              <IconButton label="Наступний" disabled={!can} onClick={() => void control({ action: "skip" })}>
+              <PlayPause player={player} disabled={!can} small />
+              <IconButton label="Наступний" size="sm" disabled={!can} onClick={() => void control({ action: "skip" })}>
                 <SkipForward className="size-4 fill-current" />
               </IconButton>
             </div>
@@ -52,7 +39,7 @@ export function CompactPlayer({ state, perms }: { state: GuildState; perms: Perm
             <button
               type="button"
               onClick={() => void summon(perms.summonChannel!)}
-              className="inline-flex w-fit items-center gap-2 rounded-full bg-[var(--accent)] px-4 py-1.5 text-sm font-semibold text-black"
+              className="inline-flex w-fit items-center gap-2 rounded-full bg-green px-4 py-1.5 text-sm font-semibold text-white"
             >
               <Headphones className="size-4" /> Покликати бота
             </button>

@@ -70,7 +70,7 @@ export interface ErrorMessage {
   error: string;
 }
 
-export type ServerMessage = GuildState | PositionMessage | ErrorMessage | { type: "pong" };
+export type ServerMessage = GuildState | PositionMessage | ErrorMessage | LibraryEvent | { type: "pong" };
 
 export interface DevGuild {
   id: string;
@@ -82,3 +82,53 @@ export interface DevGuild {
 }
 
 export type PlayMode = "queue" | "next" | "now";
+
+// ---------- бібліотека (webapi/library_api.py) ----------
+
+export interface MeStats {
+  likes: number;
+  playlists: number;
+  playlist_tracks: number;
+  plays: number;
+}
+
+export interface Me {
+  id: string;
+  name: string;
+  avatar: string | null;
+  dev: boolean;
+  /** false — БД на сервері не відкрилась, лайки й плейлисти недоступні. */
+  library: boolean;
+  created_at: number | null;
+  stats: MeStats;
+  limits: { playlists: number; playlist_tracks: number; likes: number };
+}
+
+export interface PlaylistSummary {
+  id: number;
+  name: string;
+  track_count: number;
+  duration: number;
+  /** До 4 мініатюр (mqdefault) для колажу. */
+  cover: string[];
+  created_at: number;
+  updated_at: number;
+}
+
+export interface PlaylistEntry extends Track {
+  entry_id: number;
+  added_at: number;
+}
+
+export interface PlaylistDetail extends PlaylistSummary {
+  tracks: PlaylistEntry[];
+}
+
+export interface HistoryTrack extends Track {
+  played_at: number;
+}
+
+export type LibraryEvent =
+  | { type: "library"; what: "likes"; video_id: string; liked: boolean }
+  | { type: "library"; what: "playlists"; playlist_id: number; deleted?: boolean }
+  | { type: "library"; what: "deleted" };
