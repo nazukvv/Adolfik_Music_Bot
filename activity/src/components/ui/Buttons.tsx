@@ -26,7 +26,7 @@ export function Pill({
   className?: string;
   children: ReactNode;
 }) {
-  const sizing = size === "md" ? "h-11 px-7 text-[15px]" : "h-8 px-4 text-xs";
+  const sizing = size === "md" ? "h-10 px-5 text-sm sm:h-11 sm:px-7 sm:text-[15px]" : "h-8 px-4 text-xs";
   return (
     <button
       type="button"

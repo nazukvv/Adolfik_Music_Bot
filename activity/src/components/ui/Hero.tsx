@@ -24,9 +24,9 @@ export function Hero({
 }) {
   return (
     // Зверху — місце під липку TopBar (64px): кола шапки заходять під кнопки ← →, як у референсі.
-    <section className="relative overflow-hidden px-4 pt-[84px] pb-6 sm:px-8 sm:pt-[104px] sm:pb-8">
+    <section className="relative overflow-hidden px-4 pt-[84px] pb-6 sm:px-8 sm:pt-[104px] sm:pb-8 short:pt-[76px] short:pb-5">
       <HeroCircles />
-      <div className="relative flex flex-col gap-5 @4xl:flex-row @4xl:items-end @4xl:justify-between">
+      <div className="relative flex flex-col gap-5 short:gap-4 @4xl:flex-row @4xl:items-end @4xl:justify-between">
         <div className="flex min-w-0 items-end gap-5">
           {art && <div className="hidden shrink-0 sm:block">{art}</div>}
           <div className="min-w-0">
@@ -34,7 +34,7 @@ export function Hero({
               {labelIcon && <span className="text-green [&>svg]:size-3.5">{labelIcon}</span>}
               {label}
             </p>
-            <h1 className="mt-1.5 line-clamp-2 text-[28px] leading-[1.15] font-bold tracking-tight break-words sm:text-[40px]">
+            <h1 className="mt-1.5 line-clamp-2 text-[28px] leading-[1.15] font-bold tracking-tight break-words sm:text-[40px] short:text-[34px]">
               {title}
             </h1>
             {subtitle && <div className="mt-1.5 line-clamp-2 text-sm text-dim">{subtitle}</div>}

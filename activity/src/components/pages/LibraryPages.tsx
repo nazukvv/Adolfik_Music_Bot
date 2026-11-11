@@ -62,7 +62,7 @@ function Unavailable() {
 }
 
 function LibraryHeroArt({ children }: { children: ReactNode }) {
-  return <div className="size-32 overflow-hidden rounded-xl shadow-[0_12px_40px_rgba(0,0,0,0.6)] lg:size-40">{children}</div>;
+  return <div className="size-28 overflow-hidden rounded-xl shadow-[0_12px_40px_rgba(0,0,0,0.6)] tall:size-32 lg:tall:size-40">{children}</div>;
 }
 
 /** Улюблені: шапка з «обкладинкою»-серцем, грати всі / перемішати / в чергу, таблиця. */
@@ -290,7 +290,7 @@ export function ProfilePage({ state }: { state: GuildState }) {
       <Hero
         label="Профіль"
         labelIcon={<CalendarDays />}
-        art={<Avatar src={me?.avatar ?? state.you.avatar} name={name} className="size-32 text-4xl lg:size-40" />}
+        art={<Avatar src={me?.avatar ?? state.you.avatar} name={name} className="size-28 text-4xl tall:size-32 lg:tall:size-40" />}
         title={name}
         subtitle={me?.created_at ? `В Adolfik з ${fmtDate(me.created_at)}` : "Акаунт Discord"}
       />

@@ -84,7 +84,7 @@ export function MenuButton({
         }}
         className={`grid shrink-0 place-items-center rounded-full transition ${
           variant === "pill"
-            ? "size-11 bg-pill text-white hover:bg-[#444]"
+            ? "size-10 bg-pill text-white hover:bg-[#444] sm:size-11"
             : `size-8 hover:bg-white/10 hover:text-white ${open ? "bg-white/10 text-white" : "text-dim"}`
         }`}
       >

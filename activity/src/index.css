@@ -44,6 +44,9 @@
 @custom-variant hoverable (@media (hover: hover));
 /* compact: — маленьке вікно Activity (картинка-в-картинці в Discord) */
 @custom-variant compact (@media (max-height: 420px));
+/* short: — невисоке вікно Activity на десктопі (у Discord часто ~650px); tall: — вище за нього */
+@custom-variant short (@media (max-height: 720px) and (min-width: 768px));
+@custom-variant tall (@media (min-height: 721px));
 
 /* Палітра за референсом design/reference-artist.png: чорний фон, один зелений акцент, червоний лише для ❤. */
 @theme {

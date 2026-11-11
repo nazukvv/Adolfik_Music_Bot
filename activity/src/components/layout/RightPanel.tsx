@@ -274,7 +274,7 @@ export function NowPlayingCard({ state, perms, large = false }: { state: GuildSt
             exit={{ opacity: 0 }}
             transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
           >
-            <Cover src={current.thumbnail} fallbackSrc={current.thumbnail_small} alt={current.title} className="aspect-square w-full" rounded="" />
+            <Cover src={current.thumbnail} fallbackSrc={current.thumbnail_small} alt={current.title} className="aspect-square w-full short:aspect-[4/3]" rounded="" />
           </motion.div>
         </AnimatePresence>
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/80 via-transparent to-black/70" />
