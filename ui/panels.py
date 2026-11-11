@@ -204,6 +204,10 @@ class NowPlayingPanel(discord.ui.LayoutView):
                 # Лише показує гучність; custom_id потрібен, бо persistent-view вимагає його для всіх кнопок.
                 self._button("volume", self.cb_noop, emoji=volume_icon(volume), label=f"{volume}%", disabled=True),
                 self._button("volup", self.cb_vol_up, emoji="🔊", disabled=bool(player) and volume >= MAX_VOLUME),
+                # Лайк особистий: кожен, хто натисне, додає поточний трек у свої «Улюблені» в Activity.
+                self._button(
+                    "like", self.cb_like, emoji="❤️", label="В улюблені", disabled=bool(player) and track is None
+                ),
             )
         )
         container.add_item(discord.ui.ActionRow(self._queue_select(queue)))
@@ -270,6 +274,8 @@ class NowPlayingPanel(discord.ui.LayoutView):
     # ----- доступ і помилки -----
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if (interaction.data or {}).get("custom_id") == PREFIX + "like":
+            return True  # лайкнути трек може будь-хто з сервера, не лише слухачі у войсі
         problem = voice_problem(interaction)
         if problem is None and _player(interaction) is None:
             problem = "Зараз нічого не грає. Увімкни щось через /play 🎧"
@@ -363,6 +369,28 @@ class NowPlayingPanel(discord.ui.LayoutView):
         assert player is not None
         volume = player.set_volume(player.volume + delta)
         await self.show_result(interaction, player, f"{volume_icon(volume)} Гучність {volume}% — {_name(interaction)}")
+
+    async def cb_like(self, interaction: discord.Interaction) -> None:
+        """❤ — поставити/зняти лайк поточному треку тому, хто натиснув (видно у «Улюблених» Activity)."""
+        player = _player(interaction)
+        track = player.current if player else None
+        library = getattr(interaction.client, "library", None)
+        if track is None:
+            await reply_error(interaction, "Зараз нічого не грає.")
+            return
+        if library is None:
+            await reply_error(interaction, "Улюблені тимчасово недоступні.")
+            return
+        from webapi.library import Owner  # тут, щоб ui не залежав від webapi при імпорті
+
+        user = interaction.user
+        avatar = user.avatar.with_size(64).url if user.avatar else None
+        liked = await library.toggle_like(Owner(user.id, user.global_name or user.name, avatar), track)
+        web = getattr(interaction.client, "web", None)
+        if web is not None:
+            web.library_event(user.id, "likes", video_id=track.id, liked=liked)
+        text = f"❤️ Додав «{track.title[:60]}» в улюблені" if liked else f"💔 Прибрав «{track.title[:60]}» з улюблених"
+        await interaction.response.send_message(embed=embeds.action(text, track=track), ephemeral=True)
 
     async def cb_jump(self, interaction: discord.Interaction) -> None:
         player = _player(interaction)
