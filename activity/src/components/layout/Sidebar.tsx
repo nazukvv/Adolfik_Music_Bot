@@ -1,5 +1,6 @@
-import { Heart, Home, Library, ListMusic, Search, Settings } from "lucide-react";
+import { Heart, Home, Library, ListMusic, Plus, Search, Settings, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
+import { openDialog } from "../../lib/dialogs";
 import { plural } from "../../lib/format";
 import { useLibrary } from "../../lib/library";
 import { type Route, router, useRouter } from "../../lib/router";
@@ -40,22 +41,46 @@ export function Sidebar() {
 
         <div className="mx-5 my-4 border-t border-line" />
 
-        <SideLabel>Плейлисти</SideLabel>
+        <div className="flex items-center justify-between pr-3">
+          <SideLabel>Плейлисти</SideLabel>
+          {lib.ready && (
+            <button
+              type="button"
+              onClick={() => openDialog({ kind: "create-playlist", open: true })}
+              aria-label="Новий плейлист"
+              title="Новий плейлист"
+              className="-mt-2 grid size-7 place-items-center rounded-full text-dim transition hover:bg-white/10 hover:text-white"
+            >
+              <Plus className="size-4" />
+            </button>
+          )}
+        </div>
         <div className="min-h-0 flex-1 overflow-y-auto pb-2">
           {!lib.me ? null : !lib.ready ? (
             <p className="px-5 text-xs leading-relaxed text-faint">Бібліотека зараз недоступна на сервері бота.</p>
-          ) : lib.playlists.length === 0 ? (
-            <p className="px-5 text-xs leading-relaxed text-faint">Тут з'являться твої плейлисти.</p>
           ) : (
-            lib.playlists.map((playlist) => (
-              <PlaylistItem
-                key={playlist.id}
-                name={playlist.name}
-                count={playlist.track_count}
-                active={route.name === "playlist" && route.id === playlist.id}
-                onClick={() => router.go({ name: "playlist", id: playlist.id })}
-              />
-            ))
+            <>
+              {lib.playlists.map((playlist) => (
+                <PlaylistItem
+                  key={playlist.id}
+                  name={playlist.name}
+                  count={playlist.track_count}
+                  active={route.name === "playlist" && route.id === playlist.id}
+                  onClick={() => router.go({ name: "playlist", id: playlist.id })}
+                  onDelete={() =>
+                    openDialog({ kind: "delete-playlist", id: playlist.id, name: playlist.name, count: playlist.track_count })
+                  }
+                />
+              ))}
+              <button
+                type="button"
+                onClick={() => openDialog({ kind: "create-playlist", open: true })}
+                className="flex h-10 w-full items-center gap-3 px-5 text-left text-[13px] text-dim transition-colors hover:text-white"
+              >
+                <Plus className="size-4 shrink-0" />
+                Новий плейлист
+              </button>
+            </>
           )}
         </div>
 
@@ -96,21 +121,43 @@ function NavItem({ icon, active, onClick, children }: { icon: ReactNode; active:
   );
 }
 
-function PlaylistItem({ name, count, active, onClick }: { name: string; count: number; active: boolean; onClick: () => void }) {
+/** Плейлист у сайдбарі; 🗑 з'являється при наведенні (на телефоні сайдбару нема — там видалення на сторінці). */
+function PlaylistItem({
+  name,
+  count,
+  active,
+  onClick,
+  onDelete,
+}: {
+  name: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+  onDelete: () => void;
+}) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-current={active ? "page" : undefined}
-      title={`${name} · ${plural(count, "трек", "треки", "треків")}`}
-      className={`relative flex h-10 w-full items-center gap-3 px-5 text-left text-[13px] transition-colors ${
-        active ? "bg-hover text-white" : "text-dim hover:text-white"
-      }`}
-    >
-      <ListMusic className="size-4 shrink-0" />
-      <span className="truncate">{name}</span>
+    <div className={`group relative flex h-10 items-center transition-colors ${active ? "bg-hover text-white" : "text-dim hover:text-white"}`}>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-current={active ? "page" : undefined}
+        title={`${name} · ${plural(count, "трек", "треки", "треків")}`}
+        className="flex h-full min-w-0 flex-1 items-center gap-3 pr-1 pl-5 text-left text-[13px]"
+      >
+        <ListMusic className="size-4 shrink-0" />
+        <span className="truncate">{name}</span>
+      </button>
+      <button
+        type="button"
+        onClick={onDelete}
+        aria-label={`Видалити «${name}»`}
+        title="Видалити плейлист"
+        className="mr-3 grid size-7 shrink-0 place-items-center rounded-full text-faint opacity-0 transition group-hover:opacity-100 hover:bg-white/10 hover:text-white focus-visible:opacity-100"
+      >
+        <Trash2 className="size-3.5" />
+      </button>
       {active && <span className="absolute top-1/2 right-0 h-6 w-[3px] -translate-y-1/2 rounded-l-full bg-green" />}
-    </button>
+    </div>
   );
 }
 

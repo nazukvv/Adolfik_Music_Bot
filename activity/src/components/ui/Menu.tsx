@@ -12,13 +12,22 @@ export interface MenuItem {
   danger?: boolean;
 }
 
-const WIDTH = 220;
+const WIDTH = 240;
 
 /**
  * Кнопка «⋯» з меню. Меню рендериться в <body> з position: fixed — інакше його обрізав би
  * скрол-контейнер таблиці; відкривається вгору, якщо внизу не вміщається.
  */
-export function MenuButton({ items, label = "Ще", className = "" }: { items: MenuItem[]; label?: string; className?: string }) {
+export function MenuButton({
+  items,
+  label = "Ще",
+  variant = "row",
+}: {
+  items: MenuItem[];
+  label?: string;
+  /** row — маленька сіра «⋯» у рядку; pill — кругла сіра кнопка поруч із пігулками шапки. */
+  variant?: "row" | "pill";
+}) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -73,9 +82,11 @@ export function MenuButton({ items, label = "Ще", className = "" }: { items: M
           setPos(null);
           setOpen((o) => !o);
         }}
-        className={`grid size-8 shrink-0 place-items-center rounded-full text-dim transition hover:bg-white/10 hover:text-white ${
-          open ? "bg-white/10 text-white" : ""
-        } ${className}`}
+        className={`grid shrink-0 place-items-center rounded-full transition ${
+          variant === "pill"
+            ? "size-11 bg-pill text-white hover:bg-[#444]"
+            : `size-8 hover:bg-white/10 hover:text-white ${open ? "bg-white/10 text-white" : "text-dim"}`
+        }`}
       >
         <MoreHorizontal className="size-[18px]" />
       </button>

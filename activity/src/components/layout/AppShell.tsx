@@ -6,6 +6,7 @@ import { useMediaQuery } from "../../lib/hooks";
 import { type Perms, perms as computePerms } from "../../lib/perms";
 import { type Route, router, useRouter } from "../../lib/router";
 import type { GuildState } from "../../lib/types";
+import { Dialogs } from "../Dialogs";
 import { HomePage } from "../pages/HomePage";
 import { LibraryPage, LikesPage, PlaylistPage, ProfilePage } from "../pages/LibraryPages";
 import { SearchPage } from "../pages/SearchPage";
@@ -90,6 +91,7 @@ export function AppShell({ state, online }: { state: GuildState; online: boolean
       {!md && <NowPlayingSheet {...panelProps} open={overlay} onClose={() => setOverlay(false)} />}
 
       <Toasts bottom={md ? 120 : state.player?.current ? 136 : 76} />
+      <Dialogs />
     </div>
   );
 }

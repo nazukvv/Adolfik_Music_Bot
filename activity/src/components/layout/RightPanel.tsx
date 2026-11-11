@@ -1,8 +1,10 @@
-import { ChevronDown, Disc3, Headphones, LoaderCircle, Pause, Radio, Search, X } from "lucide-react";
+import { ChevronDown, Disc3, Headphones, ListPlus, LoaderCircle, Pause, Radio, Search, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { ReactNode } from "react";
 import { summon } from "../../lib/actions";
+import { openDialog } from "../../lib/dialogs";
 import { fmtTime, plural } from "../../lib/format";
+import { useLibrary } from "../../lib/library";
 import type { Perms } from "../../lib/perms";
 import { router } from "../../lib/router";
 import type { GuildState } from "../../lib/types";
@@ -224,6 +226,7 @@ function UpNextCard({ state, onShowQueue }: { state: GuildState; onShowQueue: ()
 
 /** «Зараз грає»: велика обкладинка з темним градієнтом і заголовком поверх, нижче — трек і хто замовив. */
 export function NowPlayingCard({ state, perms, large = false }: { state: GuildState; perms: Perms; large?: boolean }) {
+  const lib = useLibrary();
   const player = state.player;
   const current = player?.current ?? null;
 
@@ -309,6 +312,11 @@ export function NowPlayingCard({ state, perms, large = false }: { state: GuildSt
             <Avatar src={current.requester.avatar} name={current.requester.name} className="size-5" />
             Замовив <span className="truncate font-medium text-white">{current.requester.name ?? "хтось"}</span>
           </p>
+        )}
+        {lib.ready && (
+          <Pill variant="outline" size="sm" className="mt-4" onClick={() => openDialog({ kind: "add-to-playlist", tracks: [current] })}>
+            <ListPlus className="size-3.5" /> В плейлист
+          </Pill>
         )}
         {player?.last_action && <p className="mt-3 truncate text-[11px] text-faint">{player.last_action}</p>}
         {perms.hint && <p className="mt-3 rounded-lg bg-white/[0.04] px-3 py-2 text-[11px] leading-relaxed text-dim">{perms.hint}</p>}

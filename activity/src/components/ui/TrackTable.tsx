@@ -1,7 +1,21 @@
-import { Headphones, ListEnd, ListPlus, Play } from "lucide-react";
-import type { ReactNode } from "react";
+import {
+  closestCenter,
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical, Headphones, ListEnd, ListPlus, ListStart, Play } from "lucide-react";
+import type { CSSProperties, HTMLAttributes, ReactNode, Ref } from "react";
 import { playTrack } from "../../lib/actions";
+import { openDialog } from "../../lib/dialogs";
 import { fmtTime } from "../../lib/format";
+import { useLibrary } from "../../lib/library";
 import { type Perms, playLabel } from "../../lib/perms";
 import type { GuildState, Track } from "../../lib/types";
 import { Cover } from "../Cover";
@@ -14,44 +28,71 @@ interface Props<T extends Track> {
   perms: Perms;
   /** Додаткова колонка (наприклад, коли грало і хто замовив) — видно на широких екранах. */
   aside?: (track: T) => ReactNode;
-  /** Додаткові пункти меню «⋯» (етап 3: У плейлист, Прибрати). */
+  /** Додаткові пункти меню «⋯» (наприклад, «Прибрати з плейлиста»). */
   extraMenu?: (track: T, index: number) => MenuItem[];
+  /** Перетягування рядків (плейлист): з якої позиції на яку. */
+  onReorder?: (from: number, to: number) => void;
   loading?: boolean;
   empty?: ReactNode;
 }
 
 /** Таблиця треків із референсу: «# N», обкладинка, назва, канал, тривалість, ❤ і «⋯». */
-export function TrackTable<T extends Track>({ tracks, state, perms, aside, extraMenu, loading, empty }: Props<T>) {
+export function TrackTable<T extends Track>({ tracks, state, perms, aside, extraMenu, onReorder, loading, empty }: Props<T>) {
   if (loading && tracks.length === 0) return <TableSkeleton />;
   if (tracks.length === 0) return <>{empty}</>;
   const player = state.player;
+  const rowProps = (track: T, index: number): RowProps => ({
+    track,
+    index,
+    perms,
+    playing: player?.current?.id === track.id,
+    paused: !!player?.paused || !!player?.preparing,
+    aside: aside?.(track),
+    extraMenu: extraMenu?.(track, index) ?? [],
+  });
+
+  if (onReorder) {
+    return (
+      <SortableRows keys={tracks.map((t) => t.key)} onReorder={onReorder}>
+        {tracks.map((track, index) => (
+          <SortableTrackRow key={track.key} {...rowProps(track, index)} />
+        ))}
+      </SortableRows>
+    );
+  }
   return (
     <div role="table" className="px-2 sm:px-6">
       {tracks.map((track, index) => (
-        <TrackRow
-          key={track.key}
-          track={track}
-          index={index}
-          perms={perms}
-          playing={player?.current?.id === track.id}
-          paused={!!player?.paused || !!player?.preparing}
-          aside={aside?.(track)}
-          extraMenu={extraMenu?.(track, index) ?? []}
-        />
+        <TrackRow key={track.key} {...rowProps(track, index)} />
       ))}
     </div>
   );
 }
 
-function TrackRow({
-  track,
-  index,
-  perms,
-  playing,
-  paused,
-  aside,
-  extraMenu,
-}: {
+function SortableRows({ keys, onReorder, children }: { keys: string[]; onReorder: (from: number, to: number) => void; children: ReactNode }) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    const from = keys.indexOf(String(active.id));
+    const to = keys.indexOf(String(over.id));
+    if (from >= 0 && to >= 0) onReorder(from, to);
+  };
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <SortableContext items={keys} strategy={verticalListSortingStrategy}>
+        <div role="table" className="px-2 sm:px-6">
+          {children}
+        </div>
+      </SortableContext>
+    </DndContext>
+  );
+}
+
+interface RowProps {
   track: Track;
   index: number;
   perms: Perms;
@@ -59,7 +100,32 @@ function TrackRow({
   paused: boolean;
   aside: ReactNode;
   extraMenu: MenuItem[];
-}) {
+}
+
+interface DragProps {
+  ref: Ref<HTMLDivElement>;
+  style: CSSProperties;
+  handle: HTMLAttributes<HTMLButtonElement>;
+  dragging: boolean;
+}
+
+function SortableTrackRow(props: RowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: props.track.key });
+  return (
+    <TrackRow
+      {...props}
+      drag={{
+        ref: setNodeRef,
+        style: { transform: CSS.Transform.toString(transform), transition },
+        handle: { ...attributes, ...listeners },
+        dragging: isDragging,
+      }}
+    />
+  );
+}
+
+function TrackRow({ track, index, perms, playing, paused, aside, extraMenu, drag }: RowProps & { drag?: DragProps }) {
+  const lib = useLibrary();
   const label = playLabel(perms, "Грати зараз");
   const blocked = perms.canAdd ? undefined : (perms.hint ?? undefined);
   const menu: MenuItem[] = [
@@ -70,17 +136,33 @@ function TrackRow({
       disabled: !perms.canAdd,
       title: blocked,
     },
-    { label: "Наступним", icon: <ListEnd />, onSelect: () => void playTrack(track, "next"), disabled: !perms.canAdd, title: blocked },
-    { label: "У чергу", icon: <ListPlus />, onSelect: () => void playTrack(track, "queue"), disabled: !perms.canAdd, title: blocked },
+    { label: "Наступним", icon: <ListStart />, onSelect: () => void playTrack(track, "next"), disabled: !perms.canAdd, title: blocked },
+    { label: "У чергу", icon: <ListEnd />, onSelect: () => void playTrack(track, "queue"), disabled: !perms.canAdd, title: blocked },
+    ...(lib.ready ? [{ label: "У плейлист", icon: <ListPlus />, onSelect: () => openDialog({ kind: "add-to-playlist", tracks: [track] }) }] : []),
     ...extraMenu,
   ];
 
   return (
     <div
+      ref={drag?.ref}
+      style={drag?.style}
       role="row"
       onDoubleClick={() => perms.canAdd && void playTrack(track, "now")}
-      className="group flex h-[65px] items-center gap-2 border-b border-line px-2 transition-colors hover:bg-white/[0.035] sm:gap-3"
+      className={`group relative flex h-[65px] items-center gap-2 border-b border-line px-2 transition-colors sm:gap-3 ${
+        drag?.dragging ? "z-10 rounded-lg bg-raise shadow-2xl ring-1 ring-white/10" : "hover:bg-white/[0.035]"
+      }`}
     >
+      {drag && (
+        <button
+          type="button"
+          {...drag.handle}
+          aria-label="Перетягни, щоб змінити порядок"
+          title="Перетягни, щоб змінити порядок"
+          className="absolute top-0 bottom-0 -left-2 grid w-5 cursor-grab touch-none place-items-center text-faint opacity-0 transition group-hover:opacity-100 hover:text-white focus-visible:opacity-100 active:cursor-grabbing touch:opacity-100 sm:-left-4"
+        >
+          <GripVertical className="size-4" />
+        </button>
+      )}
       <div className="relative grid w-9 shrink-0 place-items-center text-[13px] text-dim tabular-nums">
         {playing ? (
           <Equalizer paused={paused} className="group-hover:hoverable:hidden" />

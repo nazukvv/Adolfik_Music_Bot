@@ -21,6 +21,7 @@ import { fmtTime, plural } from "../../lib/format";
 import { media } from "../../lib/media";
 import type { Track } from "../../lib/types";
 import { Cover } from "../Cover";
+import { LikeButton } from "../ui/Bits";
 
 interface Props {
   queue: Track[];
@@ -136,6 +137,7 @@ function QueueRow({
           />
         )}
       </button>
+      <LikeButton track={track} size="sm" className="self-center opacity-60 group-hover:opacity-100 touch:opacity-100" />
       {canControl && (
         <button
           type="button"
