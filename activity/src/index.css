@@ -1,26 +1,70 @@
 @import "tailwindcss";
 
+/* Montserrat (SIL OFL, src/fonts/OFL.txt) — геометричний, як Poppins, але з кирилицею.
+   Файли лежать локально: Discord не пускає в Activity зовнішні шрифти. */
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("./fonts/montserrat-cyrillic-ext-wght-normal.woff2") format("woff2");
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("./fonts/montserrat-cyrillic-wght-normal.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("./fonts/montserrat-latin-ext-wght-normal.woff2") format("woff2");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+    U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("./fonts/montserrat-latin-wght-normal.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
+    U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 /* touch: — пристрої без ховера (телефон); hoverable: — з мишею */
 @custom-variant touch (@media (hover: none));
 @custom-variant hoverable (@media (hover: hover));
 /* compact: — маленьке вікно Activity (картинка-в-картинці в Discord) */
 @custom-variant compact (@media (max-height: 420px));
 
+/* Палітра за референсом design/reference-artist.png: чорний фон, один зелений акцент, червоний лише для ❤. */
 @theme {
-  --color-ink: #030303;
-  --color-base: #0f0f0f;
-  --color-panel: #161616;
-  --color-raise: #1f1f1f;
-  --color-line: #2a2a2a;
-  --color-dim: #a1a1a1;
-  --color-faint: #6b6b6b;
-  --font-sans: "Inter", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, "Roboto", sans-serif;
+  --color-ink: #000000;
+  --color-side: #121212; /* сайдбар, картки правої панелі */
+  --color-main: #0b0b0b; /* центральна колонка (не «center»: bg-center — це background-position) */
+  --color-hover: #1a1a1a; /* активний пункт меню, ховер */
+  --color-raise: #181818; /* меню, поповери */
+  --color-line: #1f1f1f; /* роздільники таблиці */
+  --color-pill: #393939; /* другорядна кнопка-пігулка */
+  --color-track: #515151; /* доріжка прогресу */
+  --color-dim: #9a9a9a; /* вторинний текст */
+  --color-faint: #666666;
+  --color-green: #00bd12;
+  --color-heart: #d61a0c;
+  --font-sans: "Montserrat", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, "Roboto", sans-serif;
   --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* Акцент = домінантний колір обкладинки поточного треку (App ставить --accent на <html>). */
 :root {
-  --accent: #8b5cf6;
+  --accent: #00bd12;
   color-scheme: dark;
 }
 
@@ -33,7 +77,7 @@ body,
 body {
   margin: 0;
   background: var(--color-ink);
-  color: #f1f1f1;
+  color: #ffffff;
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
@@ -46,59 +90,79 @@ textarea {
   user-select: text;
 }
 
+/* Рамка фокуса — лише з клавіатури (після кліку мишею не лишається) */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid rgb(255 255 255 / 0.7);
+  outline-offset: 2px;
+}
+
 /* Тонкі темні скролбари */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #3a3a3a transparent;
+  scrollbar-color: #2e2e2e transparent;
 }
 
-/* ---------- повзунки (прогрес, гучність) ---------- */
+/* ---------- прогрес треку: тонка доріжка #515151, біле заповнення, без кружечка ---------- */
+.seekbar {
+  --fill: 0%;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(to right, #fff var(--fill), var(--color-track) var(--fill));
+  cursor: pointer;
+  transition: height 150ms var(--ease-soft);
+}
+.seekbar:enabled:hover {
+  height: 6px;
+}
+.seekbar:disabled {
+  cursor: default;
+}
+.seekbar::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 0;
+  height: 0;
+}
+.seekbar::-moz-range-thumb {
+  width: 0;
+  height: 0;
+  border: 0;
+}
+
+/* ---------- гучність (той самий вигляд, з маленьким кружечком на ховері) ---------- */
 .slider {
   --fill: 0%;
   appearance: none;
   -webkit-appearance: none;
   height: 4px;
   border-radius: 999px;
-  background: linear-gradient(to right, var(--accent) var(--fill), rgb(255 255 255 / 0.18) var(--fill));
-  outline: none;
+  background: linear-gradient(to right, #fff var(--fill), var(--color-track) var(--fill));
   cursor: pointer;
-  transition: height 150ms var(--ease-soft);
-}
-.slider:hover,
-.slider:focus-visible {
-  height: 6px;
 }
 .slider:disabled {
   cursor: default;
-  opacity: 0.6;
+  opacity: 0.5;
 }
 .slider::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 35%, transparent);
-  transform: scale(0);
-  transition: transform 150ms var(--ease-soft);
-}
-.slider:hover::-webkit-slider-thumb,
-.slider:focus-visible::-webkit-slider-thumb,
-.slider:active::-webkit-slider-thumb {
-  transform: scale(1);
-}
-.slider:disabled::-webkit-slider-thumb {
-  transform: scale(0);
 }
 .slider::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border: 0;
   border-radius: 50%;
   background: #fff;
 }
 
-/* Еквалайзер «грає зараз» */
+/* Еквалайзер «грає зараз» (зелений, замість номера рядка) */
 @keyframes eq {
   0%,
   100% {
@@ -112,7 +176,7 @@ textarea {
   display: block;
   width: 3px;
   border-radius: 2px;
-  background: var(--accent);
+  background: var(--color-green);
   transform-origin: bottom;
   animation: eq 900ms ease-in-out infinite;
 }
@@ -121,6 +185,9 @@ textarea {
 }
 .eq > span:nth-child(3) {
   animation-delay: -600ms;
+}
+.eq > span:nth-child(4) {
+  animation-delay: -150ms;
 }
 .eq.paused > span {
   animation-play-state: paused;
