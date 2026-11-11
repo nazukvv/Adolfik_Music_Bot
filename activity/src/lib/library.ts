@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { api } from "./api";
+import { plural } from "./format";
 import { live } from "./store";
 import { toast, toastError } from "./toasts";
 import type { LibraryEvent, Me, PlaylistSummary, Track } from "./types";
@@ -89,6 +90,76 @@ class LibraryStore {
     } catch (err) {
       toastError(err);
     }
+  }
+
+  // ---------- плейлисти ----------
+  // Методи для діалогів кидають помилку (діалог покаже її під полем); решта — тостом.
+  // Після запису одразу перечитуємо список; WS-подія library прийде ще й іншим вкладкам.
+
+  async createPlaylist(name: string, tracks: Track[] = []): Promise<PlaylistSummary> {
+    const { playlist } = await api.createPlaylist(name, tracks.map((t) => t.id));
+    await this.refreshPlaylists();
+    toast(tracks.length ? `➕ Створено «${playlist.name}» і додано трек` : `📃 Створено плейлист «${playlist.name}»`);
+    return playlist;
+  }
+
+  async importPlaylist(url: string, name?: string): Promise<PlaylistSummary> {
+    const { playlist, imported } = await api.importPlaylist(url, name);
+    await this.refreshPlaylists();
+    toast(`📥 Імпортовано «${playlist.name}»: ${plural(imported, "трек", "треки", "треків")}`);
+    return playlist;
+  }
+
+  async renamePlaylist(id: number, name: string): Promise<void> {
+    await api.renamePlaylist(id, name);
+    await this.refreshPlaylists();
+  }
+
+  async deletePlaylist(id: number, name: string): Promise<void> {
+    await api.deletePlaylist(id);
+    await this.refreshPlaylists();
+    toast(`🗑 Плейлист «${name}» видалено`);
+  }
+
+  async addToPlaylist(id: number, name: string, tracks: Track[]): Promise<void> {
+    const { added, skipped } = await api.addToPlaylist(id, tracks.map((t) => t.id));
+    await this.refreshPlaylists();
+    if (added === 0) toast(`Плейлист «${name}» заповнений — більше треків не влізе`, "error", 5000);
+    else if (tracks.length === 1) toast(`➕ Додано в «${name}»`);
+    else toast(`➕ У «${name}» додано ${plural(added, "трек", "треки", "треків")}${skipped ? ` (${skipped} не влізли)` : ""}`);
+  }
+
+  async removeFromPlaylist(id: number, entryId: number, title: string): Promise<void> {
+    try {
+      await api.removeFromPlaylist(id, entryId);
+      await this.refreshPlaylists();
+      toast(`Прибрано з плейлиста: ${title}`);
+    } catch (err) {
+      toastError(err);
+    }
+  }
+
+  /** Перетягування в плейлисті: сторінка вже показала новий порядок, тут — лише сервер. */
+  async reorder(id: number, entryId: number, to: number): Promise<boolean> {
+    try {
+      await api.reorderPlaylist(id, entryId, to);
+      return true;
+    } catch (err) {
+      toastError(err);
+      await this.refreshPlaylists(); // сторінка перечитає справжній порядок
+      return false;
+    }
+  }
+
+  /** Видалити свої дані: профіль, лайки, плейлисти (в історії серверів ім'я прибирається). */
+  async deleteMyData(): Promise<void> {
+    const { deleted } = await api.deleteMe();
+    await this.load();
+    toast(
+      `Дані видалено: ${plural(deleted.likes, "лайк", "лайки", "лайків")}, ${plural(deleted.playlists, "плейлист", "плейлисти", "плейлистів")}`,
+      "info",
+      6000,
+    );
   }
 
   isLiked(videoId: string): boolean {

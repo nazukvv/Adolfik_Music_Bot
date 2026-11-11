@@ -135,4 +135,18 @@ export const api = {
     request<PlaylistDetail>("GET", `/api/me/playlists/${id}`, undefined, signal),
   playPlaylist: (id: number, options: PlayOptions) =>
     request<PlayResult>("POST", `/api/me/playlists/${id}/play`, options),
+  createPlaylist: (name: string, videoIds: string[] = []) =>
+    request<{ playlist: PlaylistSummary }>("POST", "/api/me/playlists", videoIds.length ? { name, video_ids: videoIds } : { name }),
+  importPlaylist: (url: string, name?: string) =>
+    request<{ playlist: PlaylistSummary; imported: number }>("POST", "/api/me/playlists/import", name ? { url, name } : { url }),
+  renamePlaylist: (id: number, name: string) => request<{ ok: true }>("PATCH", `/api/me/playlists/${id}`, { name }),
+  deletePlaylist: (id: number) => request<{ ok: true }>("DELETE", `/api/me/playlists/${id}`),
+  addToPlaylist: (id: number, videoIds: string[]) =>
+    request<{ added: number; skipped: number }>("POST", `/api/me/playlists/${id}/tracks`, { video_ids: videoIds }),
+  removeFromPlaylist: (id: number, entryId: number) =>
+    request<{ ok: true }>("DELETE", `/api/me/playlists/${id}/tracks/${entryId}`),
+  reorderPlaylist: (id: number, entryId: number, to: number) =>
+    request<{ ok: true }>("POST", `/api/me/playlists/${id}/reorder`, { entry_id: entryId, to }),
+  deleteMe: () =>
+    request<{ deleted: { profile: number; likes: number; playlists: number; history_anonymized: number } }>("DELETE", "/api/me"),
 };
