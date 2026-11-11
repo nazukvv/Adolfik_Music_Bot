@@ -17,6 +17,8 @@ yt-dlp[default]
 
 # aiohttp: HTTP-клієнт і веб-сервер Discord Activity (aiohttp.web, у процесі бота).
 aiohttp>=3.9
+# SQLite для профілів, лайків і плейлистів Activity (data/adolfik.db).
+aiosqlite>=0.20
 python-dotenv>=1.0
 # Домінантний колір мініатюри для смужки embed.
 pillow>=11

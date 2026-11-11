@@ -265,6 +265,10 @@ class YouTube:
 
     # ---------- пошук ----------
 
+    def known(self, video_id: str) -> Track | None:
+        """Трек із недавніх пошуків (метадані з YouTube, без нового запиту)."""
+        return self._known.get(video_id)
+
     def cached_search(self, query: str) -> list[Track] | None:
         key = _normalize_query(query)
         hit = self._cache.get(key)
@@ -326,7 +330,7 @@ class YouTube:
 
     # ---------- посилання ----------
 
-    async def resolve(self, query: str) -> Resolved:
+    async def resolve(self, query: str, *, playlist_limit: int = PLAYLIST_LIMIT) -> Resolved:
         """Посилання на відео/плейлист або текстовий запит (перший результат пошуку)."""
         query = query.strip()
         if looks_like_url(query):
@@ -337,15 +341,15 @@ class YouTube:
             video_id = video_id_from_url(query)
             if video_id and (known := self._known.get(video_id)) is not None:
                 return Resolved(tracks=[known])
-            return await self._run(self._resolve_url_sync, query)
+            return await self._run(self._resolve_url_sync, query, playlist_limit)
 
         results = await self.search(query, limit=1)
         if not results:
             raise YouTubeError(f"Нічого не знайшов за запитом «{query[:80]}».")
         return Resolved(tracks=[results[0]])
 
-    def _resolve_url_sync(self, url: str) -> Resolved:
-        opts = _options(extract_flat="in_playlist", playlistend=PLAYLIST_LIMIT, format="bestaudio/best")
+    def _resolve_url_sync(self, url: str, playlist_limit: int = PLAYLIST_LIMIT) -> Resolved:
+        opts = _options(extract_flat="in_playlist", playlistend=playlist_limit, format="bestaudio/best")
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)

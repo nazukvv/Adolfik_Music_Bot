@@ -23,15 +23,17 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import BASE_DIR, COOKIES_FILE, LOG_DIR, Settings
-from player import PlayerManager
+from config import BASE_DIR, COOKIES_FILE, DB_FILE, LOG_DIR, Settings
+from player import GuildPlayer, PlayerManager, spawn
 from stations import StationManager
 from ui import embeds
 from ui.checks import reply_error
 from ui.colors import ColorPicker
 from ui.panels import NowPlayingPanel
 from ui.views import LegacyPanelButtons
+from webapi.library import Library
 from webapi.server import ActivityServer
+from youtube import Track
 from youtube import YouTube
 
 log = logging.getLogger("adolfik")
@@ -188,6 +190,7 @@ class Adolfik(commands.Bot):
         self.players = PlayerManager(self)
         self.stations = StationManager(self)
         self.web = ActivityServer(self)  # Discord Activity: API + WebSocket + фронтенд
+        self.library: Library | None = None  # профілі, лайки, плейлисти (SQLite); None — БД недоступна
         self.tree.error(self._on_app_command_error)
         self._background: set[asyncio.Task[None]] = set()
 
@@ -198,6 +201,7 @@ class Adolfik(commands.Bot):
         # Persistent: кнопки й меню черги працюють і на панелях, надісланих до перезапуску бота.
         self.add_view(NowPlayingPanel())
         self.add_view(LegacyPanelButtons())  # «📜 Черга» на старих embed-панелях
+        await self._open_library()
         await self.web.start()  # той самий event loop: API має прямий доступ до bot.players і bot.yt
         # Синхронізація у фоні: якщо Discord притримає її rate limit-ом, бот однаково підключиться.
         self._sync_task = asyncio.create_task(self._sync_commands())
@@ -211,6 +215,28 @@ class Adolfik(commands.Bot):
         if guild is None:
             return list(await self.http.get_global_commands(self.application_id))
         return list(await self.http.get_guild_commands(self.application_id, guild.id))
+
+    async def _open_library(self) -> None:
+        library = Library(DB_FILE)
+        try:
+            await library.open()
+        except Exception:
+            log.exception("Не вдалося відкрити БД %s — лайки й плейлисти в Activity вимкнені", DB_FILE)
+            return
+        self.library = library
+        self.players.on_track_start(self._record_play)
+        log.info("БД: %s (схема v%d)", DB_FILE, await library.schema_version())
+
+    def _record_play(self, player: GuildPlayer, track: Track) -> None:
+        if self.library is not None:
+            spawn(self._save_play(player.guild.id, track))
+
+    async def _save_play(self, guild_id: int, track: Track) -> None:
+        try:
+            assert self.library is not None
+            await self.library.record_play(guild_id, track)
+        except Exception as exc:
+            log.warning("Не вдалося записати історію відтворення: %s", exc)
 
     async def _sync_commands(self) -> None:
         """Синхронізація slash-команд, яка не видаляє Entry Point-команду Activity.
@@ -311,6 +337,8 @@ class Adolfik(commands.Bot):
     async def close(self) -> None:
         await self.players.shutdown()
         await self.web.stop()
+        if self.library is not None:
+            await self.library.close()
         await self.colors.close()
         self.yt.close()
         await super().close()

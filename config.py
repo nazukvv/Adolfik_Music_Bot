@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent
 LOG_DIR = BASE_DIR / "logs"
 COOKIES_FILE = BASE_DIR / "cookies.txt"
+DB_FILE = BASE_DIR / "data" / "adolfik.db"  # профілі, лайки, плейлисти Activity (data/ у .gitignore)
 
 DEFAULT_COLOR = 0x8B5CF6  # фіолетовий акцент
 

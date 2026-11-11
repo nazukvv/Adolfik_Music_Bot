@@ -30,8 +30,11 @@ from config import BASE_DIR
 from player import spawn
 from webapi import auth
 from webapi.auth import Identity
+from webapi.errors import ApiError
+from webapi.library import LibraryError, Owner
+from webapi.library_api import LibraryApi
 from webapi.state import LOOP_BY_NAME, bot_channel, guild_state, track_json, you_json
-from youtube import YouTubeError
+from youtube import Resolved, YouTubeError
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -61,15 +64,6 @@ PLACEHOLDER_HTML = """<!doctype html><html lang="uk"><meta charset="utf-8"><titl
 <p style="opacity:.6">cd activity &amp;&amp; npm ci &amp;&amp; npm run build</p></div></body></html>"""
 
 
-class ApiError(Exception):
-    """Помилка з HTTP-статусом і текстом для користувача."""
-
-    def __init__(self, status: int, message: str) -> None:
-        super().__init__(message)
-        self.status = status
-        self.message = message
-
-
 @dataclass(eq=False, slots=True)
 class Client:
     ws: web.WebSocketResponse
@@ -77,7 +71,7 @@ class Client:
     member: discord.Member
 
 
-class ActivityServer:
+class ActivityServer(LibraryApi):
     # Базова адреса Discord API (тести підставляють сюди локальний сервер-заглушку).
     discord_api = DISCORD_API
 
@@ -99,7 +93,7 @@ class ActivityServer:
         r.add_get("/api/health", self.health)
         r.add_get("/api/config", self.config)
         r.add_post("/api/token", self.token)
-        r.add_get("/api/me", self.me)
+        self._add_library_routes(r)  # /api/me/... — профіль, лайки, плейлисти; /api/history
         r.add_get("/api/dev/guilds", self.dev_guilds)
         r.add_get("/api/state", self.state)
         r.add_get("/api/search", self.search)
@@ -190,6 +184,9 @@ class ActivityServer:
         try:
             return await handler(request)
         except ApiError as exc:
+            payload = {"error": exc.message} | ({"code": exc.code} if exc.code else {})
+            return self._json(payload, exc.status)
+        except LibraryError as exc:
             return self._json({"error": exc.message}, exc.status)
         except web.HTTPException:
             raise
@@ -400,6 +397,12 @@ class ActivityServer:
             f"https://cdn.discordapp.com/avatars/{user_id}/{user['avatar']}.png?size=64" if user.get("avatar") else None
         )
         session = auth.issue(self.secret, user_id=user_id, name=name, avatar=avatar)
+        library = getattr(self.bot, "library", None)
+        if library is not None:  # профіль створюється (або оновлюється) при кожному вході
+            try:
+                await library.touch_user(Owner(user_id, name, avatar))
+            except Exception:
+                log.exception("Activity: не вдалося зберегти профіль %s", user_id)
         log.info("Activity: увійшов %s (%s)", name, user_id)
         return self._json(
             {
@@ -427,12 +430,6 @@ class ActivityServer:
             )
         return self._json({"guilds": guilds})
 
-    async def me(self, request: web.Request) -> web.Response:
-        identity = self._identity(request)
-        return self._json(
-            {"id": str(identity.user_id), "name": identity.name, "avatar": identity.avatar, "dev": identity.dev}
-        )
-
     # ---------- читання ----------
 
     async def state(self, request: web.Request) -> web.Response:
@@ -453,25 +450,31 @@ class ActivityServer:
 
     # ---------- керування ----------
 
-    async def play(self, request: web.Request) -> web.Response:
-        """{guild, query|url, mode: queue|next|now} — через ту саму логіку, що й /play."""
-        body = await self._body(request)
-        identity, guild, member = await self._context(request, body)
-        self._limit(identity.user_id, "play", 8, 10)
-        query = str(body.get("url") or body.get("query") or "").strip()[:300]
-        if not query:
-            raise ApiError(400, "Нема що вмикати: передай query або url")
-        mode = body.get("mode", "queue")
+    def _check_can_play(self, guild: discord.Guild, member: discord.Member, summon: bool) -> None:
+        """Activity сама бота не кличе: якщо його нема у твоєму войсі, грати можна лише з summon=true
+        (одна кнопка «Покликати й грати»). /play і музичний канал працюють як раніше — їх це не стосується."""
+        voice = member.voice.channel if member.voice else None
+        if voice is None:
+            raise ApiError(409, "Спершу зайди в голосовий канал 🎧", code="not_in_voice")
+        channel = bot_channel(guild)
+        if channel != voice and not summon:
+            text = (
+                "Спершу поклич бота у свій войс"
+                if channel is None
+                else f"Бот зараз у «{channel.name}» — поклич його до себе"
+            )
+            raise ApiError(409, text, code="summon_required")
+        if problem := self._music().join_problem(member, guild):
+            raise ApiError(409, problem)
+
+    async def _enqueue_for(
+        self, guild: discord.Guild, member: discord.Member, resolved: Resolved, mode: Any, summon: bool
+    ) -> web.Response:
+        """Поставити треки в чергу через ту саму логіку, що й /play (Music.enqueue_tracks)."""
         if mode not in ("queue", "next", "now"):
             raise ApiError(400, "mode має бути queue, next або now")
-
+        self._check_can_play(guild, member, summon)
         music = self._music()
-        if problem := music.join_problem(member, guild):
-            raise ApiError(409, problem)
-        try:
-            resolved = await self.bot.yt.resolve(query)
-        except YouTubeError as exc:
-            raise ApiError(400, str(exc)) from exc
         existing = self.bot.players.get(guild.id)
         voice = member.voice.channel if member.voice else None
         text_channel = existing.text_channel if existing else voice
@@ -505,6 +508,22 @@ class ActivityServer:
                 "state": self._state(guild, member),
             }
         )
+
+    async def play(self, request: web.Request) -> web.Response:
+        """{guild, query|url, mode: queue|next|now, summon?} — summon=true кличе бота, якщо його нема у войсі."""
+        body = await self._body(request)
+        identity, guild, member = await self._context(request, body)
+        self._limit(identity.user_id, "play", 8, 10)
+        query = str(body.get("url") or body.get("query") or "").strip()[:300]
+        if not query:
+            raise ApiError(400, "Нема що вмикати: передай query або url")
+        summon = bool(body.get("summon"))
+        self._check_can_play(guild, member, summon)  # швидко, ще до запиту в YouTube
+        try:
+            resolved = await self.bot.yt.resolve(query)
+        except YouTubeError as exc:
+            raise ApiError(400, str(exc)) from exc
+        return await self._enqueue_for(guild, member, resolved, body.get("mode", "queue"), summon)
 
     async def control(self, request: web.Request) -> web.Response:
         """{guild, action, value?}: pause | resume | toggle | skip | stop | previous_restart | seek | volume | loop
@@ -711,6 +730,15 @@ class ActivityServer:
         base = guild_state(self.bot, guild)
         for client in list(clients):
             await self._send(client, {**base, "you": you_json(guild, client.member)})
+
+    def library_event(self, user_id: int, what: str, **data: Any) -> None:
+        """Змінилась бібліотека користувача (лайки, плейлисти, видалення даних) — повідомити всі його вкладки,
+        зокрема коли лайк поставлено кнопкою ❤ на панелі в Discord."""
+        payload = {"type": "library", "what": what, **data}
+        for clients in list(self._clients.values()):
+            for client in list(clients):
+                if client.member.id == user_id:
+                    spawn(self._send(client, payload))
 
     async def _send(self, client: Client, payload: dict[str, Any]) -> None:
         if client.ws.closed:

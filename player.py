@@ -442,6 +442,7 @@ class GuildPlayer:
             if not started:
                 started = True
                 log.info("[%s] ▶ %s (%s)", self.guild.name, track.title, track.id)
+                self.bot.players.track_started(self, track)
                 spawn(self.update_panel(new_track=True))  # не чекаємо: панель може стояти в черзі до 2.5 с
                 self._schedule_prefetch(track)
             else:
@@ -749,6 +750,7 @@ class PlayerManager:
         self._players: dict[int, GuildPlayer] = {}
         self._locks: dict[int, asyncio.Lock] = {}
         self._listeners: list[Callable[[int], None]] = []
+        self._track_listeners: list[Callable[[GuildPlayer, Track], None]] = []
 
     # ---------- підписка на зміни (Activity) ----------
 
@@ -763,6 +765,26 @@ class PlayerManager:
                 self._listeners.remove(callback)
 
         return unsubscribe
+
+    def on_track_start(self, callback: Callable[[GuildPlayer, Track], None]) -> Callable[[], None]:
+        """callback(player, track) — трек щойно заграв (історія відтворення). Має бути швидким."""
+        self._track_listeners.append(callback)
+
+        def unsubscribe() -> None:
+            with contextlib.suppress(ValueError):
+                self._track_listeners.remove(callback)
+
+        return unsubscribe
+
+    def track_started(self, player: GuildPlayer, track: Track) -> None:
+        for callback in list(self._track_listeners):
+            try:
+                callback(player, track)
+            except Exception:
+                log.exception("Помилка підписника старту треку")
+
+    def all(self) -> list[GuildPlayer]:
+        return [p for p in self._players.values() if not p.closing]
 
     def notify(self, guild_id: int) -> None:
         for callback in list(self._listeners):
